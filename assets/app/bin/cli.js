@@ -29,6 +29,7 @@ codex-session-diff
 
   open [--session latest|<id>] [--port 3847] [--no-open]
       启动查看器；默认会先生成/刷新本会话改动概括
+      单实例：端口占用时结束旧进程并复用同一端口（不递增）
 
   summarize [--session latest|<id>] [--summary "手动概括"] [--json]
       基于本次会话 diff 生成智能改动概括并写入 meta

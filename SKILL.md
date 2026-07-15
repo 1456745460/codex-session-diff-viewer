@@ -61,6 +61,7 @@ scripts/session_diff.sh open --session <sessionId>
 - `open` 会先基于本次会话 diff 生成智能改动概括并写入 `meta.json`
 - 启动本地网页并自动打开浏览器
 - stdout 打印可点击 URL，例如 `http://127.0.0.1:3847`
+- **单实例端口策略**：默认端口 `3847`；若被占用，先结束占用该端口的旧查看器进程，再复用同一端口（不递增端口，避免多开浪费资源）
 - 页面左右分别为 **编码前 / 本次后**
 - 会话下拉展示：`时间 · 项目名 · 改动概括 · N 个文件`
 
@@ -77,7 +78,7 @@ scripts/session_diff.sh status --session latest
 1. **改文件前** `begin`（或对新增目标先 `track`）
 2. 正常编码、验证
 3. **任务收尾**执行 `open --session latest`（或对应 sessionId）
-4. 在最终回复中给出可点击链接：`[查看本次代码变更](http://127.0.0.1:PORT)`
+4. 在最终回复中给出可点击链接：`[查看本次代码变更](http://127.0.0.1:3847)`（端口固定，不因多次 open 递增）
 5. 明确说明：这是**本次会话变更**，不是 git 仓库 diff
 
 若未执行 begin 就已改文件：
@@ -90,6 +91,7 @@ scripts/session_diff.sh status --session latest
 - 对比源：`~/.codex/session-diffs/<sessionId>/baseline` vs 工作区当前文件
 - 不要用 `git diff HEAD`、`git diff --staged` 充当“此次变更”
 - 仅本机 `127.0.0.1`，适合本地自用
+- 始终保持单实例：`open` 不递增端口，占用时杀旧进程复用 `3847`
 - 前端支持：并排/统一、同步滚动、收起未更改、行号、路径、字体/字号、上一个/下一个差异
 
 ## 输出模板（收尾）
