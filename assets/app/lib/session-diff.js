@@ -8,6 +8,7 @@ const {
   readCurrentText,
   trackFiles,
   normalizeRel,
+  deriveProjectName,
   updateSessionMeta,
 } = require('./session-store');
 
@@ -384,7 +385,7 @@ async function collectChangedFiles(sessionId) {
 
 async function finalizeSessionInsights(sessionId, options = {}) {
   const { session, files } = await collectChangedFiles(sessionId);
-  const projectName = path.basename(session.workspaceRoot || '') || session.projectName || 'project';
+  const projectName = deriveProjectName(session.workspaceRoot) || session.projectName || 'project';
   const stats = {
     added: files.filter((f) => f.status === 'added').length,
     modified: files.filter((f) => f.status === 'modified' || f.status === 'renamed' || f.status === 'copied').length,
@@ -446,7 +447,7 @@ async function listSessionCards(limit = 100, options = {}) {
         card = s;
       }
     }
-    const projectName = path.basename(card.workspaceRoot || '') || card.projectName || 'project';
+    const projectName = deriveProjectName(card.workspaceRoot) || card.projectName || 'project';
     const changedFileCount = typeof card.changedFileCount === 'number'
       ? card.changedFileCount
       : (Array.isArray(card.files) ? card.files.length : 0);
@@ -483,7 +484,7 @@ async function getSessionSummary(sessionId, options = {}) {
   }
   files.sort((a, b) => a.path.localeCompare(b.path, 'zh'));
 
-  const projectName = path.basename(latest.workspaceRoot || '') || latest.projectName || 'project';
+  const projectName = deriveProjectName(latest.workspaceRoot) || latest.projectName || 'project';
   let changeSummary = latest.changeSummary || '';
   if (options.finalize) {
     const insight = await finalizeSessionInsights(sessionId, {

@@ -31,7 +31,12 @@ npm install
 
 ## 项目名说明
 
-会话下拉中的 **项目名** 取自 `--workspace` 工作区路径的**最后一级文件夹名**（例如 `/Users/you/javaProject/demo` → `demo`），  
+会话下拉中的 **项目名** 取自 `--workspace` 工作区路径：先去掉当前用户主目录前缀，再把剩余路径段用 `-` 连接。
+
+示例：
+- `/Users/wangbingbing/javaProject/traceback/backend` → `javaProject-traceback-backend`
+- `/Users/you/demo/app` → `demo-app`
+
 不使用 `--title` 任务标题，避免出现各种临时标题混在项目名里。
 
 ## 目录结构

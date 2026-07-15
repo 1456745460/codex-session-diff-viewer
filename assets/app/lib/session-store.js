@@ -89,6 +89,27 @@ async function readTextMaybe(filePath) {
   }
 }
 
+
+function deriveProjectName(workspaceRoot) {
+  if (!workspaceRoot) return 'project';
+  const abs = path.resolve(String(workspaceRoot));
+  const home = os.homedir();
+  let relative = abs;
+  if (abs === home) {
+    return path.basename(home) || 'home';
+  }
+  const homePrefix = home.endsWith(path.sep) ? home : `${home}${path.sep}`;
+  if (abs.startsWith(homePrefix)) {
+    relative = abs.slice(homePrefix.length);
+  } else {
+    // 非家目录路径：去掉盘符/根路径后拼接
+    relative = abs.replace(/^[A-Za-z]:[\\/]/, '').replace(/^[\\/]+/, '');
+  }
+  const parts = relative.split(/[\\/]+/).filter(Boolean);
+  if (!parts.length) return path.basename(abs) || 'project';
+  return parts.join('-');
+}
+
 function resolveUnderRoot(root, relPath) {
   const abs = path.resolve(root, relPath);
   const rootAbs = path.resolve(root) + path.sep;
@@ -149,7 +170,7 @@ async function createSession({ workspace, title = '', files = [], note = '' }) {
     });
   }
 
-  const projectName = path.basename(workspaceRoot) || 'project';
+  const projectName = deriveProjectName(workspaceRoot);
   const meta = {
     sessionId,
     createdAt: new Date().toISOString(),
@@ -344,8 +365,8 @@ async function updateSessionMeta(sessionId, patch = {}) {
     files: Array.isArray(patch.files) ? patch.files : meta.files,
     updatedAt: new Date().toISOString(),
   };
-  if (!next.projectName) {
-    next.projectName = path.basename(next.workspaceRoot || '') || next.title || 'project';
+  if (!next.projectName || patch.workspaceRoot) {
+    next.projectName = deriveProjectName(next.workspaceRoot) || next.title || 'project';
   }
   await writeJson(metaPath(sessionId), next);
   return next;
@@ -365,6 +386,7 @@ module.exports = {
   revertFiles,
   updateSessionMeta,
   normalizeRel,
+  deriveProjectName,
   resolveUnderRoot,
   sessionDir,
   metaPath,

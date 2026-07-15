@@ -653,10 +653,25 @@
 
   // 时间 / 项目名 / 文件数：完整展示
   // 概括说明：完整放入 DOM，仅中间列按真实剩余宽度 CSS 省略
+
+  function deriveProjectName(workspaceRoot, fallback = '') {
+    if (!workspaceRoot) return fallback || 'project';
+    let p = String(workspaceRoot).replace(/\\/g, '/');
+    // 去掉 /Users/<name>/ 或 /home/<name>/
+    const homeMatch = p.match(/^\/(?:Users|home)\/[^/]+\/(.+)$/);
+    if (homeMatch) {
+      const parts = homeMatch[1].split('/').filter(Boolean);
+      return parts.length ? parts.join('-') : (fallback || 'project');
+    }
+    p = p.replace(/^[A-Za-z]:\//, '').replace(/^\/+/, '');
+    const parts = p.split('/').filter(Boolean);
+    return parts.length ? parts.join('-') : (fallback || 'project');
+  }
+
   function getSessionLabelParts(s) {
     const time = formatSessionTime(s);
-    // 项目名固定取操作工作区文件夹名（projectName），不用 title/任务标题
-    const project = s.projectName || (s.workspaceRoot ? String(s.workspaceRoot).split('/').filter(Boolean).pop() : '') || 'project';
+    // 项目名：去掉用户主目录后，用 - 拼接路径段（如 javaProject-traceback-backend）
+    const project = deriveProjectName(s.workspaceRoot, s.projectName);
     const summaryFull = (s.changeSummary || '').trim() || '暂无改动概括';
     const count = typeof s.changedFileCount === 'number'
       ? s.changedFileCount
@@ -713,7 +728,7 @@
       // native option 文本：概括已单独截断，其它字段完整
       opt.textContent = label.text;
       opt.dataset.summaryFull = s.changeSummary || '';
-      opt.dataset.project = s.projectName || (s.workspaceRoot ? String(s.workspaceRoot).split('/').filter(Boolean).pop() : '') || '';
+      opt.dataset.project = deriveProjectName(s.workspaceRoot, s.projectName);
       opt.dataset.time = label.parts.time;
       opt.dataset.count = label.parts.countText;
       opt.title = [
