@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Codex Session Diff</title>
+  <link rel="stylesheet" href="/styles.css" />
+  <link rel="stylesheet" href="/vendor/highlight-theme.css" />
+  <script src="/vendor/highlight.min.js"></script>
+</head>
+<body>
+  <div id="app">
+    <header class="topbar">
+      <div class="topbar-row topbar-row-main">
+        <div class="brand">
+          <span class="brand-mark">◈</span>
+          <div class="brand-text">
+            <strong>Codex Session Diff</strong>
+            <span id="repoMeta" class="muted">加载中…</span>
+          </div>
+        </div>
+        <div class="session-picker" title="扫描 ~/.codex/session-diffs 历史会话">
+          <span class="field-label">会话</span>
+          <div class="cselect cselect-session" id="sessionSelectBox" data-cselect="sessionSelect">
+            <button type="button" class="cselect-trigger" id="sessionSelectTrigger" aria-haspopup="listbox" aria-expanded="false">
+              <span class="cselect-value" id="sessionSelectValue">加载中…</span>
+              <span class="cselect-caret">▾</span>
+            </button>
+            <div class="cselect-menu" id="sessionSelectMenu" role="listbox" hidden></div>
+            <select id="sessionSelect" class="cselect-native" aria-hidden="true" tabindex="-1">
+              <option value="">加载中…</option>
+            </select>
+          </div>
+          <button id="scanSessionsBtn" class="btn secondary btn-mini" type="button" title="重新扫描历史会话">扫描</button>
+        </div>
+      </div>
+
+      <div class="topbar-row topbar-row-tools">
+        <div class="toolbar">
+          <div class="seg" role="group" aria-label="查看模式">
+            <button id="btnSplit" class="seg-btn active" type="button" title="并排查看器">并排</button>
+            <button id="btnUnified" class="seg-btn" type="button" title="统一查看器">统一</button>
+          </div>
+
+          <label class="toggle" title="左右同步滚动">
+            <input id="syncScroll" type="checkbox" checked />
+            <span>同步滚动</span>
+          </label>
+
+          <label class="toggle" title="收起未更改片段">
+            <input id="collapseUnchanged" type="checkbox" checked />
+            <span>收起未更改</span>
+          </label>
+
+          <label class="check">
+            <input id="showLineNo" type="checkbox" checked />
+            <span>行号</span>
+          </label>
+
+          <label class="check">
+            <input id="showPath" type="checkbox" checked />
+            <span>文件路径</span>
+          </label>
+
+          <div class="select-field" title="代码字体">
+            <span class="field-label">字体</span>
+            <div class="cselect" id="fontFamilyBox" data-cselect="fontFamily">
+              <button type="button" class="cselect-trigger" id="fontFamilyTrigger" aria-haspopup="listbox" aria-expanded="false">
+                <span class="cselect-value" id="fontFamilyValue">.AppleSystemUIFont</span>
+                <span class="cselect-caret">▾</span>
+              </button>
+              <div class="cselect-menu" id="fontFamilyMenu" role="listbox" hidden></div>
+              <select id="fontFamily" class="cselect-native" aria-hidden="true" tabindex="-1">
+                <option value=".AppleSystemUIFont">.AppleSystemUIFont</option>
+                <option value="system-ui">system-ui</option>
+                <option value="-apple-system">-apple-system</option>
+                <option value="SF Mono">SF Mono</option>
+                <option value="Menlo">Menlo</option>
+                <option value="Monaco">Monaco</option>
+                <option value="JetBrains Mono">JetBrains Mono</option>
+                <option value="Fira Code">Fira Code</option>
+                <option value="Source Code Pro">Source Code Pro</option>
+                <option value="Cascadia Code">Cascadia Code</option>
+                <option value="Courier New">Courier New</option>
+                <option value="PingFang SC">PingFang SC</option>
+                <option value="Hiragino Sans GB">Hiragino Sans GB</option>
+                <option value="Microsoft YaHei">Microsoft YaHei</option>
+                <option value="monospace">monospace</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="select-field" title="代码字号 10–20">
+            <span class="field-label">字号</span>
+            <div class="cselect cselect-sm" id="fontSizeBox" data-cselect="fontSize">
+              <button type="button" class="cselect-trigger" id="fontSizeTrigger" aria-haspopup="listbox" aria-expanded="false">
+                <span class="cselect-value" id="fontSizeValue">14</span>
+                <span class="cselect-caret">▾</span>
+              </button>
+              <div class="cselect-menu" id="fontSizeMenu" role="listbox" hidden></div>
+              <select id="fontSize" class="cselect-native" aria-hidden="true" tabindex="-1">
+                <option value="10">10</option>
+                <option value="11">11</option>
+                <option value="12">12</option>
+                <option value="13">13</option>
+                <option value="14" selected>14</option>
+                <option value="15">15</option>
+                <option value="16">16</option>
+                <option value="17">17</option>
+                <option value="18">18</option>
+                <option value="19">19</option>
+                <option value="20">20</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="nav-btns">
+            <button id="prevDiff" class="btn secondary" type="button" title="上一个差异块 (Shift+F7)">↑ 上一个差异</button>
+            <button id="nextDiff" class="btn secondary" type="button" title="下一个差异块 (F7)">↓ 下一个差异</button>
+          </div>
+
+          <button id="refreshBtn" class="btn secondary" type="button" title="刷新变更">刷新</button>
+          <button id="undoFileBtn" class="btn danger" type="button" title="撤销当前文件到编码前">撤销当前文件</button>
+          <button id="undoAllBtn" class="btn danger" type="button" title="撤销本会话全部改动到编码前">撤销全部</button>
+        </div>
+      </div>
+    </header>
+
+    <main class="layout" id="mainLayout">
+      <aside class="sidebar" id="sidebar">
+        <div id="sessionSummaryCard" class="session-summary-card">
+          <div class="session-summary-label">改动概括</div>
+          <div id="sessionSummaryText" class="session-summary-text">加载中…</div>
+        </div>
+        <div class="sidebar-header">
+          <div class="sidebar-title">改动的文件</div>
+          <div id="fileStats" class="file-stats muted"></div>
+        </div>
+        <div class="search-wrap">
+          <input id="fileFilter" type="search" placeholder="过滤文件…" autocomplete="off" />
+        </div>
+        <ul id="fileList" class="file-list"></ul>
+        <div id="emptyFiles" class="empty-state hidden">当前没有未提交的改动</div>
+      </aside>
+      <div class="sidebar-resizer" id="sidebarResizer" title="拖拽调整文件列表宽度" role="separator" aria-orientation="vertical"></div>
+
+      <section class="content">
+
+        <div id="fileHeader" class="file-header hidden">
+          <div class="file-header-left">
+            <span id="fileStatusBadge" class="status-badge"></span>
+            <span id="filePathLabel" class="file-path"></span>
+          </div>
+          <div id="fileDiffStats" class="diff-stats"></div>
+        </div>
+
+        <div id="welcome" class="welcome">
+          <div class="welcome-card">
+            <h1>选择左侧文件查看本次会话变更</h1>
+            <p>对比「编码前基线」与「本次改完后」的代码，不是 git 工作区相对 HEAD 的 diff。</p>
+            <p class="muted">主题：CodeBuddy Dark · 模式：Session Baseline</p>
+          </div>
+        </div>
+
+        <div id="diffRoot" class="diff-root hidden"></div>
+        <div id="errorBox" class="error-box hidden"></div>
+      </section>
+    </main>
+  </div>
+
+  <div id="confirmModal" class="modal hidden" aria-hidden="true">
+    <div class="modal-backdrop" data-close="1"></div>
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="confirmTitle">
+      <h2 id="confirmTitle">确认撤销</h2>
+      <p id="confirmMessage" class="modal-message"></p>
+      <div class="modal-actions">
+        <button id="confirmCancel" class="btn secondary" type="button">取消</button>
+        <button id="confirmOk" class="btn danger" type="button">确认撤销</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>

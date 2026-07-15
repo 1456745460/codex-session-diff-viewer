@@ -1,0 +1,21 @@
+{
+  "name": "codex-session-diff-viewer",
+  "version": "1.1.0",
+  "private": true,
+  "description": "Session-scoped code change viewer for Codex (baseline vs current, not git HEAD)",
+  "main": "server.js",
+  "bin": {
+    "codex-session-diff": "./bin/cli.js"
+  },
+  "scripts": {
+    "start": "node bin/cli.js open",
+    "begin": "node bin/cli.js begin",
+    "status": "node bin/cli.js status"
+  },
+  "dependencies": {
+    "diff": "^7.0.0",
+    "express": "^4.21.2",
+    "highlight.js": "^11.11.1",
+    "open": "^8.4.2"
+  }
+}
