@@ -656,21 +656,20 @@
 
   function deriveProjectName(workspaceRoot, fallback = '') {
     if (!workspaceRoot) return fallback || 'project';
-    let p = String(workspaceRoot).replace(/\\/g, '/');
-    // 去掉 /Users/<name>/ 或 /home/<name>/
-    const homeMatch = p.match(/^\/(?:Users|home)\/[^/]+\/(.+)$/);
+    let p = String(workspaceRoot).replace(/\\/g, '/').replace(/\/+$/, '');
+    // 去掉 /Users/<name> 或 /home/<name> 主目录前缀，保留 /javaProject/traceback/backend
+    const homeMatch = p.match(/^\/(?:Users|home)\/[^/]+(\/.*)?$/);
     if (homeMatch) {
-      const parts = homeMatch[1].split('/').filter(Boolean);
-      return parts.length ? parts.join('-') : (fallback || 'project');
+      const rest = homeMatch[1] || '';
+      return rest || '/';
     }
-    p = p.replace(/^[A-Za-z]:\//, '').replace(/^\/+/, '');
-    const parts = p.split('/').filter(Boolean);
-    return parts.length ? parts.join('-') : (fallback || 'project');
+    p = p.replace(/^[A-Za-z]:/, '');
+    return p.startsWith('/') ? p : `/${p}`;
   }
 
   function getSessionLabelParts(s) {
     const time = formatSessionTime(s);
-    // 项目名：去掉用户主目录后，用 - 拼接路径段（如 javaProject-traceback-backend）
+    // 项目名：去掉用户主目录前缀，保留路径形态（如 /javaProject/traceback/backend）
     const project = deriveProjectName(s.workspaceRoot, s.projectName);
     const summaryFull = (s.changeSummary || '').trim() || '暂无改动概括';
     const count = typeof s.changedFileCount === 'number'

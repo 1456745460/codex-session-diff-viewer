@@ -92,22 +92,19 @@ async function readTextMaybe(filePath) {
 
 function deriveProjectName(workspaceRoot) {
   if (!workspaceRoot) return 'project';
-  const abs = path.resolve(String(workspaceRoot));
-  const home = os.homedir();
-  let relative = abs;
+  const abs = path.resolve(String(workspaceRoot)).replace(/\\/g, '/');
+  const home = path.resolve(os.homedir()).replace(/\\/g, '/');
   if (abs === home) {
-    return path.basename(home) || 'home';
+    return '/';
   }
-  const homePrefix = home.endsWith(path.sep) ? home : `${home}${path.sep}`;
-  if (abs.startsWith(homePrefix)) {
-    relative = abs.slice(homePrefix.length);
-  } else {
-    // 非家目录路径：去掉盘符/根路径后拼接
-    relative = abs.replace(/^[A-Za-z]:[\\/]/, '').replace(/^[\\/]+/, '');
+  // 去掉用户主目录前缀，保留路径形态：/javaProject/traceback/backend
+  if (abs.startsWith(`${home}/`)) {
+    const rest = abs.slice(home.length);
+    return rest.startsWith('/') ? rest : `/${rest}`;
   }
-  const parts = relative.split(/[\\/]+/).filter(Boolean);
-  if (!parts.length) return path.basename(abs) || 'project';
-  return parts.join('-');
+  // 非家目录：统一成以 / 开头的路径展示
+  const cleaned = abs.replace(/^[A-Za-z]:/, '');
+  return cleaned.startsWith('/') ? cleaned : `/${cleaned}`;
 }
 
 function resolveUnderRoot(root, relPath) {
