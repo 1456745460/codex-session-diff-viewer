@@ -703,6 +703,68 @@
     return { html, title: full, text: full, parts };
   }
 
+  async function focusSession(sessionId, { selectFirstFile = true } = {}) {
+    if (!sessionId) return;
+    const next = String(sessionId);
+    await loadSessions(next);
+    if (!state.sessions.some((s) => s.sessionId === next)) {
+      // 列表尚未出现时仍尝试加载 summary
+      state.sessionId = next;
+    } else {
+      state.sessionId = next;
+    }
+    if (el.sessionSelect) {
+      el.sessionSelect.value = state.sessionId;
+      refreshCustomSelect('sessionSelect');
+    }
+    persistPrefs();
+    state.selectedPath = null;
+    state.fileDiff = null;
+    await loadSummary();
+    if (selectFirstFile && state.files.length) {
+      await selectFile(state.files[0].path, true);
+    } else {
+      showWelcome();
+    }
+    try { window.focus(); } catch {}
+  }
+
+  function connectLiveChannel() {
+    if (state.liveSource || typeof EventSource === 'undefined') return;
+    try {
+      const es = new EventSource('/api/events');
+      state.liveSource = es;
+      es.addEventListener('hello', () => {
+        // connected
+      });
+      es.addEventListener('focus', (ev) => {
+        try {
+          const data = JSON.parse(ev.data || '{}');
+          if (!data.sessionId) return;
+          if (data.sessionId === state.sessionId) {
+            // 同一会话：刷新列表与内容
+            loadSessions(data.sessionId)
+              .then(() => loadSummary())
+              .then(async () => {
+                if (state.selectedPath) await selectFile(state.selectedPath, true);
+                else if (state.files.length) await selectFile(state.files[0].path, true);
+              })
+              .catch((e) => setError(e.message));
+            return;
+          }
+          focusSession(data.sessionId).catch((e) => setError(e.message));
+        } catch (e) {
+          setError(e.message || String(e));
+        }
+      });
+      es.onerror = () => {
+        // 浏览器会自动重连；服务重启时也无需额外处理
+      };
+    } catch {
+      // ignore
+    }
+  }
+
   async function loadSessions(preferSessionId = '') {
     // sessions list endpoint should not require session query to fail
     const res = await fetch('/api/sessions');
@@ -1691,6 +1753,7 @@
     initCustomSelects();
     applyToolbarState();
     bindEvents();
+    connectLiveChannel();
     bindSidebarResize();
     try {
       await loadSessions(state.sessionId);

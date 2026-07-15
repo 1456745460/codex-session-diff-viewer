@@ -37,7 +37,8 @@ Codex Session Diff Viewer
 说明:
   仅展示“本次会话”相对 begin 基线的变更，不是 git working tree diff。
   前端可通过 /api/sessions 切换历史会话。
-  默认单实例：若端口被占用，会结束旧进程后复用同一端口（不递增端口）。
+  默认单实例：优先复用已运行服务；浏览器页通过 SSE 保持会话。
+  若端口被脏占用且健康检查失败，才结束旧进程并复用同一端口（不递增端口）。
 `);
 }
 
@@ -117,17 +118,117 @@ async function createApp(defaultSessionId) {
   app.use(express.json({ limit: '2mb' }));
   app.use(express.static(publicDir));
 
+  let activeDefaultSessionId = defaultSessionId || null;
+  /** @type {Set<import('http').ServerResponse>} */
+  const sseClients = new Set();
+
+  function sseSend(res, event, data) {
+    res.write(`event: ${event}\n`);
+    res.write(`data: ${JSON.stringify(data)}\n\n`);
+  }
+
+  function broadcast(event, data) {
+    const dead = [];
+    for (const res of sseClients) {
+      try {
+        sseSend(res, event, data);
+      } catch {
+        dead.push(res);
+      }
+    }
+    for (const res of dead) {
+      sseClients.delete(res);
+    }
+    return sseClients.size;
+  }
+
   async function pickSessionId(req) {
-    const q = req.query.session || req.body?.session || defaultSessionId || 'latest';
+    const q = req.query.session || req.body?.session || activeDefaultSessionId || defaultSessionId || 'latest';
     return resolveSessionId(q);
   }
 
   app.get('/api/health', async (_req, res) => {
     try {
-      const sessionId = await resolveSessionId(defaultSessionId || 'latest');
-      res.json({ ok: true, mode: 'session', sessionId, defaultSessionId: sessionId });
+      const sessionId = await resolveSessionId(activeDefaultSessionId || defaultSessionId || 'latest');
+      res.json({
+        ok: true,
+        mode: 'session',
+        sessionId,
+        defaultSessionId: sessionId,
+        clients: sseClients.size,
+        live: sseClients.size > 0,
+      });
     } catch (error) {
-      res.json({ ok: true, mode: 'session', sessionId: null, error: error.message });
+      res.json({
+        ok: true,
+        mode: 'session',
+        sessionId: null,
+        clients: sseClients.size,
+        live: sseClients.size > 0,
+        error: error.message,
+      });
+    }
+  });
+
+  app.get('/api/runtime', (_req, res) => {
+    res.json({
+      ok: true,
+      clients: sseClients.size,
+      live: sseClients.size > 0,
+      defaultSessionId: activeDefaultSessionId,
+      pid: process.pid,
+    });
+  });
+
+  // 浏览器页面保持的实时通道：用于复用已打开标签，切换到最新会话
+  app.get('/api/events', (req, res) => {
+    res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    if (typeof res.flushHeaders === 'function') res.flushHeaders();
+
+    sseClients.add(res);
+    sseSend(res, 'hello', {
+      ok: true,
+      clients: sseClients.size,
+      defaultSessionId: activeDefaultSessionId,
+      at: Date.now(),
+    });
+
+    const heartbeat = setInterval(() => {
+      try {
+        res.write(`: ping ${Date.now()}\n\n`);
+      } catch {
+        clearInterval(heartbeat);
+      }
+    }, 15000);
+
+    req.on('close', () => {
+      clearInterval(heartbeat);
+      sseClients.delete(res);
+    });
+  });
+
+  app.post('/api/focus', async (req, res) => {
+    try {
+      const raw = req.body?.session || req.body?.sessionId || activeDefaultSessionId || 'latest';
+      const sessionId = await resolveSessionId(raw);
+      activeDefaultSessionId = sessionId;
+      const clients = broadcast('focus', {
+        sessionId,
+        reason: req.body?.reason || 'open',
+        at: Date.now(),
+      });
+      res.json({
+        ok: true,
+        sessionId,
+        clients,
+        live: clients > 0,
+        reusedTab: clients > 0,
+      });
+    } catch (error) {
+      res.status(400).json({ error: error.message, code: error.code || 'ERROR' });
     }
   });
 
@@ -257,7 +358,7 @@ async function main() {
       if (meta) console.log(`  工作区: ${meta.workspaceRoot}`);
       console.log(`  地址: ${url}`);
       console.log('  模式: 本次会话变更（相对 begin 基线，非 git HEAD diff）');
-      console.log('  单实例: 端口占用时会结束旧进程并复用同一端口');
+      console.log('  单实例: 优先复用已开页面(SSE)；必要时结束旧进程并固定端口');
       if (args.open) {
         try {
           await open(url);
