@@ -966,12 +966,14 @@ body.is-resizing-sidebar {
 }
 
 .diff-table {
-  width: 100%;
+  /* 至少铺满可见区域；有长行时按内容最大宽度撑开，边框跟随内容全宽 */
+  width: max-content;
+  min-width: 100%;
   border-collapse: collapse;
   font-family: var(--diff-font-family);
   font-size: var(--diff-font-size);
   line-height: var(--diff-line-height);
-  table-layout: fixed;
+  table-layout: auto;
 }
 
 .diff-table td {
@@ -1006,12 +1008,26 @@ body.is-resizing-sidebar {
 }
 
 .code {
-  width: 100%;
+  width: auto;
+  min-width: 100%;
   padding: 0 12px !important;
   color: var(--fg);
-  overflow-wrap: anywhere;
-  white-space: pre-wrap;
-  word-break: break-word;
+  /* 不强制折行：让表格按最长行决定最大宽度，差异块边框覆盖整段内容宽 */
+  white-space: pre;
+  word-break: normal;
+  overflow-wrap: normal;
+}
+
+
+/* 行号/gutter 固定列宽，代码列随内容扩展 */
+.diff-table col.code-col,
+.diff-table td.code {
+  min-width: 12ch;
+}
+
+.diff-table td.code {
+  /* 表格按 max-content 计算宽度时，保证边框覆盖整列 */
+  box-sizing: border-box;
 }
 
 .hide-ln .ln {
@@ -1083,9 +1099,13 @@ body.is-resizing-sidebar {
   scroll-margin-top: 48px;
 }
 
-/* 一块一个边框：通过 start/mid/end 拼成连续框 */
+/* 一块一个边框：通过 start/mid/end 拼成连续框
+   边框画在 .code 单元格上，单元格宽度 = 表格内容最大宽度（非仅视口宽度） */
 .row-diff-block .code {
   position: relative;
+  box-sizing: border-box;
+  /* 保证左右边框始终贴齐整列最大内容宽 */
+  width: 100%;
 }
 
 .row-diff-block.block-type-add {
