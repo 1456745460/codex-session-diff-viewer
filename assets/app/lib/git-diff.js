@@ -155,10 +155,12 @@ async function listChangedFiles(repoRoot) {
     let additions = 0;
     let deletions = 0;
     if (!binary) {
-      const oldText =
-        f.status === 'added' ? '' : await readHeadFile(repoRoot, f.oldPath || f.path);
-      const newText =
-        f.status === 'deleted' ? '' : await readWorkingFile(repoRoot, f.path);
+      const oldText = normalizeNewlines(
+        f.status === 'added' ? '' : await readHeadFile(repoRoot, f.oldPath || f.path)
+      );
+      const newText = normalizeNewlines(
+        f.status === 'deleted' ? '' : await readWorkingFile(repoRoot, f.path)
+      );
       const parts = Diff.diffLines(oldText, newText);
       for (const part of parts) {
         const count = part.count || (part.value ? part.value.split('\n').length - (part.value.endsWith('\n') ? 1 : 0) : 0);
@@ -197,8 +199,14 @@ async function isBinaryFileQuick(repoRoot, file) {
   }
 }
 
+function normalizeNewlines(text) {
+  return String(text ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+}
+
 function buildLineDiff(oldText, newText) {
-  const parts = Diff.diffLines(oldText, newText);
+  const normalizedOld = normalizeNewlines(oldText);
+  const normalizedNew = normalizeNewlines(newText);
+  const parts = Diff.diffLines(normalizedOld, normalizedNew);
   const unified = [];
   const sideBySide = [];
 
@@ -338,10 +346,12 @@ async function getFileDiff(repoRoot, filePath) {
   }
 
   const oldPath = meta.oldPath || meta.path;
-  const oldText =
-    meta.status === 'added' ? '' : await readHeadFile(repoRoot, oldPath);
-  const newText =
-    meta.status === 'deleted' ? '' : await readWorkingFile(repoRoot, meta.path);
+  const oldText = normalizeNewlines(
+    meta.status === 'added' ? '' : await readHeadFile(repoRoot, oldPath)
+  );
+  const newText = normalizeNewlines(
+    meta.status === 'deleted' ? '' : await readWorkingFile(repoRoot, meta.path)
+  );
 
   const built = buildLineDiff(oldText, newText);
   return {

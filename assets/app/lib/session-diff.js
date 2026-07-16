@@ -185,8 +185,14 @@ function pairSideBySide(rows) {
   return result;
 }
 
+function normalizeNewlines(text) {
+  return String(text ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+}
+
 function buildLineDiff(oldText, newText) {
-  const parts = Diff.diffLines(oldText, newText);
+  const normalizedOld = normalizeNewlines(oldText);
+  const normalizedNew = normalizeNewlines(newText);
+  const parts = Diff.diffLines(normalizedOld, normalizedNew);
   const unified = [];
   const sideBySide = [];
   let oldLine = 1;
@@ -264,8 +270,8 @@ async function buildFileEntry(session, relPath, opts = { includeUnchanged: false
     };
   }
 
-  const oldText = baseline.exists ? baseline.text : '';
-  const newText = current.exists ? current.text : '';
+  const oldText = normalizeNewlines(baseline.exists ? baseline.text : '');
+  const newText = normalizeNewlines(current.exists ? current.text : '');
   const changed = oldText !== newText || baseline.exists !== current.exists;
   const status = classifyStatus(baseline.exists, current.exists, changed);
   if (!changed && !opts.includeUnchanged) return null;
@@ -553,8 +559,8 @@ async function getSessionFileDiff(sessionId, filePath) {
     };
   }
 
-  const oldText = baseline.exists ? baseline.text : '';
-  const newText = current.exists ? current.text : '';
+  const oldText = normalizeNewlines(baseline.exists ? baseline.text : '');
+  const newText = normalizeNewlines(current.exists ? current.text : '');
   const status = classifyStatus(baseline.exists, current.exists, oldText !== newText);
   const built = buildLineDiff(oldText, newText);
   return {
@@ -589,4 +595,5 @@ module.exports = {
   finalizeSessionInsights,
   generateChangeSummary,
   buildLineDiff,
+  normalizeNewlines,
 };
