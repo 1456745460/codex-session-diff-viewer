@@ -1,4 +1,4 @@
 interface:
   display_name: "Codex 会话变更 Diff"
-  short_description: "编码前基线 vs 本次改完后的本地 Diff 查看器"
-  default_prompt: "按 codex-session-diff-viewer 流程：先 begin 捕获基线，编码完成后 open 打开本次会话变更（不是 git diff）。"
+  short_description: "一轮一 session：本回合编码前基线 vs 改完后的本地 Diff"
+  default_prompt: "按 codex-session-diff-viewer 流程：每一轮对话单独 begin 捕获本回合基线，编码完成后 open 打开本回合变更（不是 git diff，也不是整条聊天累计 diff）。"

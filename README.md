@@ -1,9 +1,11 @@
 # Codex Session Diff Viewer
 
-本地网页端工具：查看 **Codex 本次会话编码变更**（编码前基线 vs 改完后）。
+本地网页端工具：查看 **Codex 本回合（一轮对话）编码变更**（编码前基线 vs 改完后）。
 
 > 这不是 `git diff`，也不是工作区相对 HEAD 的变更。  
-> 它只对比：**本次 begin 时的文件快照** ↔ **改完后的当前文件**。
+> 也不是整条聊天线程的累计 diff。  
+> 它只对比：**本回合 begin 时的文件快照** ↔ **本回合改完后的当前文件**。  
+> **规则：一轮对话 = 一个 session；每轮改代码前必须重新 begin。**
 
 默认查看地址：`http://127.0.0.1:3847`（**单实例 + 标签复用**：已开页面则 SSE 切到最新会话，不新开标签）
 
@@ -23,7 +25,12 @@ Codex 改完代码后，你需要快速复查：
 - 手工改动
 - 其他会话遗留改动
 
-本 skill 用「会话基线」隔离出 **仅本次 Codex 编码动作**。
+本 skill 用「会话基线」隔离出 **仅本回合 Codex 编码动作**。
+
+默认策略是 **一轮对话一个 session**：
+- 用户第 1 次请求 → session A
+- 用户第 2 次请求 → session B（新 begin）
+- 不要把整条聊天累计进同一个 session
 
 想让 Codex 自动执行这套流程：把 **第 4 节系统提示词** 写入 `~/.codex/AGENTS.md`。
 
@@ -69,7 +76,7 @@ chmod +x ~/.codex/skills/codex-session-diff-viewer/scripts/session_diff.sh
 ## 3. 最短使用流程（必会）
 
 ```bash
-# 1) 改文件前：拍基线
+# 1) 本回合改文件前：新建 session 并拍基线（每轮都要重新 begin）
 "$HOME/.codex/skills/codex-session-diff-viewer/scripts/session_diff.sh" begin \
   --workspace "/abs/path/to/project" \
   --files "src/a.js,src/b.ts,docs/readme.md"
@@ -95,7 +102,7 @@ chmod +x ~/.codex/skills/codex-session-diff-viewer/scripts/session_diff.sh
 http://127.0.0.1:3847
 ```
 
-页面左侧是本次改动文件，右侧是「编码前 vs 改完后」Diff。
+页面左侧是本回合改动文件，右侧是「本回合编码前 vs 改完后」Diff。会话下拉可切换历史各轮。
 
 ---
 
@@ -112,41 +119,54 @@ http://127.0.0.1:3847
 
 ### 4.2 可直接复制的系统提示词（与当前 AGENTS 强制规则一致）
 
+目标：让 Codex **每一轮对话单独 begin**，只展示本回合变更。
+
 ```markdown
 ## Codex 会话代码变更复查（强制）
 
-只要本回合会创建/修改/删除代码或项目文件，必须使用 skill `codex-session-diff-viewer`，展示**本次会话变更**，禁止用 git 工作区相对仓库的 diff 代替。
+只要**本回合**会创建/修改/删除代码或项目文件，必须使用 skill `codex-session-diff-viewer`，展示**本回合**变更，禁止用 git 工作区相对仓库的 diff 代替。
 
-### 必须流程
-1. **首次改文件前**执行 begin，捕获编码前基线：
+### 关键定义：一轮对话 = 一个 session
+
+- **一轮对话 / 本回合**：用户的一次请求 + 你为完成该请求进行的编码，直到本轮最终回复。
+- **禁止**把整条聊天线程从头到尾复用同一个 session。
+- **禁止**在新的用户请求里继续 `track --session latest` 挂到上一轮 session（除非用户明确要求对比跨多轮总变更）。
+- 每一轮只要会改文件，都必须 **重新 `begin` 新建 sessionId**。
+- 旧 session 仅用于历史下拉查看，不得作为新一轮改动的默认容器。
+
+### 必须流程（每一轮独立）
+1. **本回合首次改文件前**执行 begin，捕获**本回合编码前**基线：
    ```bash
    "$HOME/.codex/skills/codex-session-diff-viewer/scripts/session_diff.sh" begin \
      --workspace "<绝对工作区路径>" \
-     --files "相对路径1,相对路径2"
+     --files "相对路径1,相对路径2" \
+     --title "<本回合任务一句话>"
    ```
-2. 正常编码。
-3. 若中途要改未跟踪文件：先 `track --session <id|latest> --files ...`，再修改。
-4. **编码任务收尾**（最终回复前）执行 summarize + open：
+2. 正常编码（只改本回合需要的文件）。
+3. 若中途要改**本回合尚未 track** 的文件：先对本回合 session 执行 `track`，再修改。
+4. **本回合收尾**（最终回复前）执行 summarize + open（优先使用本回合 sessionId）：
    ```bash
-   "$HOME/.codex/skills/codex-session-diff-viewer/scripts/session_diff.sh" summarize --session latest
-   "$HOME/.codex/skills/codex-session-diff-viewer/scripts/session_diff.sh" open --session latest
+   "$HOME/.codex/skills/codex-session-diff-viewer/scripts/session_diff.sh" summarize \
+     --session <本回合sessionId|latest> \
+     --summary "<本回合改动一句话>"
+   "$HOME/.codex/skills/codex-session-diff-viewer/scripts/session_diff.sh" open \
+     --session <本回合sessionId|latest>
    ```
-   - 若本回合改动点已明确，可用 `--summary "一句话概括"` 写入更准确摘要
-   - `open` 也会自动补齐智能概括（时间/项目名/改动点/文件数用于会话下拉）
 5. 在最终回复提供可点击地址，例如：
-   `[查看本次代码变更](http://127.0.0.1:3847)`
-6. 文案必须写明：这是“本次会话编码前 vs 改完后”的变更，不是 git HEAD/工作区 diff。
+   `[查看本回合代码变更](http://127.0.0.1:3847)`
+6. 文案必须写明：这是“**本回合**编码前 vs 改完后”的变更，不是 git HEAD/工作区 diff，也不是整条聊天的累计 diff。
 
 ### 禁止
 - 不要用 `git diff`、`git diff HEAD`、`git status` 结果充当“此次 Codex 变更”
 - 不要在未 begin 的情况下假装有会话级 diff
+- 不要把上一轮 session 的累计变更当作本回合 diff
+- 不要在新的用户请求中默认 `track --session latest` 延续旧 session
 
 ### 说明
 - skill 详情见：`~/.codex/skills/codex-session-diff-viewer/SKILL.md`
 - 基线保存在：`~/.codex/session-diffs/`
+- 页面会话下拉中的多个 session 分别对应历史各轮；本回合应切换到最新新建的 sessionId
 ```
-
-> 说明：`open` 默认固定 `http://127.0.0.1:3847`。若浏览器标签已打开，会通过 SSE 复用该页并切换到最新会话，不新开标签。
 
 ### 4.3 更短版（空间有限时）
 
