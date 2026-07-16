@@ -157,6 +157,41 @@ input {
   z-index: 4;
 }
 
+/* 今日 / 往日 切换开关 */
+.day-filter-switch {
+  display: inline-flex;
+  align-items: center;
+  background: var(--bg-input);
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.day-filter-btn {
+  padding: 3px 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  border: none;
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+  white-space: nowrap;
+  border-radius: 0;
+}
+
+.day-filter-btn:hover {
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+
+.day-filter-btn.active {
+  background: var(--bg-active);
+  color: var(--fg-accent);
+  font-weight: 600;
+}
+
 .field-label {
   color: var(--fg-muted);
   font-size: 12px;

@@ -20,6 +20,10 @@
           </div>
         </div>
         <div class="session-picker" title="扫描 ~/.codex/session-diffs 历史会话">
+          <div class="day-filter-switch" id="dayFilterSwitch" title="切换今日/往日会话">
+            <button type="button" class="day-filter-btn active" id="dayFilterToday" data-filter="today">今日</button>
+            <button type="button" class="day-filter-btn" id="dayFilterHistory" data-filter="history">往日</button>
+          </div>
           <span class="field-label">会话</span>
           <div class="cselect cselect-session" id="sessionSelectBox" data-cselect="sessionSelect">
             <button type="button" class="cselect-trigger" id="sessionSelectTrigger" aria-haspopup="listbox" aria-expanded="false">

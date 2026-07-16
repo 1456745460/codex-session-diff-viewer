@@ -52,6 +52,7 @@
     sidebarWidth: clampSidebarWidth(localStorage.getItem('cdv.sidebarWidth') || '300'),
     sessionId: localStorage.getItem('cdv.sessionId') || '',
     sessions: [],
+    dayFilter: localStorage.getItem('cdv.dayFilter') || 'today', // 'today' | 'history'
     currentDiffIndex: -1,
     diffAnchors: [],
     syncingScroll: false,
@@ -88,6 +89,9 @@
     undoAllBtn: document.getElementById('undoAllBtn'),
     sessionSelect: document.getElementById('sessionSelect'),
     scanSessionsBtn: document.getElementById('scanSessionsBtn'),
+    dayFilterSwitch: document.getElementById('dayFilterSwitch'),
+    dayFilterToday: document.getElementById('dayFilterToday'),
+    dayFilterHistory: document.getElementById('dayFilterHistory'),
     sidebar: document.getElementById('sidebar'),
     sidebarResizer: document.getElementById('sidebarResizer'),
     mainLayout: document.getElementById('mainLayout'),
@@ -589,6 +593,7 @@
     localStorage.setItem('cdv.fontSize', String(state.fontSize));
     localStorage.setItem('cdv.sidebarWidth', String(state.sidebarWidth));
     if (state.sessionId) localStorage.setItem('cdv.sessionId', state.sessionId);
+    localStorage.setItem('cdv.dayFilter', state.dayFilter);
   }
 
   function applyTypography() {
@@ -765,24 +770,48 @@
     }
   }
 
+  function isTodaySession(s) {
+    if (!s.createdAt) return false;
+    const t = new Date(s.createdAt);
+    if (Number.isNaN(t.getTime())) return false;
+    const now = new Date();
+    return t.getFullYear() === now.getFullYear()
+      && t.getMonth() === now.getMonth()
+      && t.getDate() === now.getDate();
+  }
+
+  function applyDayFilterUI() {
+    if (el.dayFilterToday) el.dayFilterToday.classList.toggle('active', state.dayFilter === 'today');
+    if (el.dayFilterHistory) el.dayFilterHistory.classList.toggle('active', state.dayFilter === 'history');
+  }
+
   async function loadSessions(preferSessionId = '') {
     // sessions list endpoint should not require session query to fail
     const res = await fetch('/api/sessions');
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || '加载会话失败');
     state.sessions = data.sessions || [];
+
+    // 按 dayFilter 过滤展示，今日模式下若无数据自动降级显示全部
+    let visibleSessions = state.sessions;
+    if (state.dayFilter === 'today') {
+      const todaySessions = state.sessions.filter(isTodaySession);
+      visibleSessions = todaySessions.length > 0 ? todaySessions : state.sessions;
+    }
+
     const select = el.sessionSelect;
     if (!select) return data;
     select.innerHTML = '';
-    if (!state.sessions.length) {
+    if (!visibleSessions.length) {
       const opt = document.createElement('option');
       opt.value = '';
       opt.textContent = '暂无历史会话';
       select.appendChild(opt);
       state.sessionId = '';
+      applyDayFilterUI();
       return data;
     }
-    for (const s of state.sessions) {
+    for (const s of visibleSessions) {
       const opt = document.createElement('option');
       opt.value = s.sessionId;
       const label = buildSessionLabelHtml(s);
@@ -799,11 +828,12 @@
       ].filter(Boolean).join('\n');
       select.appendChild(opt);
     }
-    const preferred = preferSessionId || state.sessionId || data.current || state.sessions[0].sessionId;
-    const exists = state.sessions.some((s) => s.sessionId === preferred);
-    state.sessionId = exists ? preferred : state.sessions[0].sessionId;
+    const preferred = preferSessionId || state.sessionId || data.current || visibleSessions[0].sessionId;
+    const exists = visibleSessions.some((s) => s.sessionId === preferred);
+    state.sessionId = exists ? preferred : visibleSessions[0].sessionId;
     select.value = state.sessionId;
     persistPrefs();
+    applyDayFilterUI();
     refreshCustomSelect('sessionSelect');
     return data;
   }
@@ -1712,6 +1742,21 @@
         .then(() => loadSummary())
         .catch((e) => setError(e.message));
     });
+    el.dayFilterSwitch?.addEventListener('click', (e) => {
+      const btn = e.target.closest('.day-filter-btn');
+      if (!btn) return;
+      const filter = btn.dataset.filter;
+      if (!filter || filter === state.dayFilter) return;
+      state.dayFilter = filter;
+      persistPrefs();
+      loadSessions('')
+        .then(() => loadSummary())
+        .then(async () => {
+          if (state.files.length) await selectFile(state.files[0].path, true);
+          else showWelcome();
+        })
+        .catch((e) => setError(e.message));
+    });
     el.sessionSelect?.addEventListener('change', () => {
       const next = el.sessionSelect.value;
       if (!next || next === state.sessionId) return;
@@ -1752,6 +1797,7 @@
   async function init() {
     initCustomSelects();
     applyToolbarState();
+    applyDayFilterUI();
     bindEvents();
     connectLiveChannel();
     bindSidebarResize();
