@@ -147,6 +147,7 @@ function guessLanguage(filePath) {
     '.patch': 'diff',
     '.log': 'accesslog',
     '.txt': 'plaintext',
+    '.ftl': 'freemarker',
   };
   return map[ext] || 'plaintext';
 }

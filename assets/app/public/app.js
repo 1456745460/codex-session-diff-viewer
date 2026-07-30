@@ -161,6 +161,8 @@
       ps1: 'powershell',
       tf: 'terraform',
       proto: 'protobuf',
+      ftl: 'freemarker',
+      freemarker: 'freemarker',
       plaintext: null,
     };
     const lang = aliases[raw] !== undefined ? aliases[raw] : raw;
