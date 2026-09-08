@@ -12,8 +12,9 @@
 
 - 根目录：`$CODEX_HOME/session-diffs`（默认 `~/.codex/session-diffs`）
 - 会话：`session-diffs/<sessionId>/`
-  - `meta.json`：工作区、跟踪文件、时间、本回合标题/摘要
-  - `baseline/**`：本回合编码前文件快照
+  - `meta.json`：工作区、跟踪文件、时间、本回合标题/摘要、`afterCapturedAt`
+  - `baseline/**`：本回合编码前文件快照（版本 1）
+  - `after/**`：本回合改完后文件快照（版本 2，summarize/open 或下一轮 begin 时冻结）
 - `session-diffs/latest.json`：最近一次 begin 的 sessionId
 
 ## begin 语义
@@ -25,16 +26,20 @@
 
 每次 `begin` 都会创建**新的** `sessionId`，即使工作区相同、聊天线程相同。
 
+若上一轮还没有 `after` 快照，新 `begin` 会在切换 latest 之前，用当时工作区内容把上一轮冻成 after（避免历史会话之后一直跟最新文件对比）。
+
 ## track 语义
 
 - 仅允许 track 到**当前回合** session
 - 新一轮不要把新文件 track 到上一轮 session
 - `track --session latest` 只有在“本回合刚 begin 过”时才安全
 
-## open 语义
+## open / summarize 语义
 
+- 若该 session 仍是 latest：把工作区当前内容写入 `after/**`，刷新「改完后」快照
 - 读取 session 跟踪文件列表
-- 对每个文件比较 baseline 与 workspace 当前内容
+- 对每个文件比较 `baseline` 与 `after`（有 after 快照时）；尚未冻结才回退到工作区当前内容
+- 切换到历史会话时只用该轮自己的 baseline/after，不会掺进后来的修改
 - 未变化文件不进入列表
 - 服务默认端口 3847
 - **单实例策略**：
@@ -47,7 +52,7 @@
 ## 与 git 的区别
 
 - git diff：相对 HEAD/index 的工作区状态，可能混入更早未提交改动
-- session diff：仅相对**本回合 begin 基线**，精确对应本回合 Codex 编码动作
+- session diff：仅相对**本回合 begin 基线 vs 本回合 after 快照**，精确对应本回合编码动作；后续再改同一文件不会污染历史会话
 
 ## 与“整条聊天累计 diff”的区别
 

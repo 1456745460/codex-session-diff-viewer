@@ -35,7 +35,7 @@ Codex Session Diff Viewer
   node server.js [--session <id|latest>] [--port 3847] [--open]
 
 说明:
-  仅展示“本次会话”相对 begin 基线的变更，不是 git working tree diff。
+  仅展示“本次会话”编码前基线 vs 本回合改完后快照，不是 git working tree diff，也不是相对工作区最新文件。
   前端可通过 /api/sessions 切换历史会话。
   默认单实例：优先复用已运行服务；浏览器页通过 SSE 保持会话。
   若端口被脏占用且健康检查失败，才结束旧进程并复用同一端口（不递增端口）。
@@ -258,6 +258,7 @@ async function createApp(defaultSessionId) {
       const insight = await finalizeSessionInsights(sessionId, {
         summary: req.body?.summary || '',
         force: req.body?.force !== false,
+        captureAfter: true,
       });
       res.json(insight);
     } catch (error) {
@@ -357,7 +358,7 @@ async function main() {
       if (sessionId) console.log(`  默认会话: ${sessionId}`);
       if (meta) console.log(`  工作区: ${meta.workspaceRoot}`);
       console.log(`  地址: ${url}`);
-      console.log('  模式: 本次会话变更（相对 begin 基线，非 git HEAD diff）');
+      console.log('  模式: 本次会话变更（编码前基线 vs 本回合后快照，非工作区最新文件）');
       console.log('  单实例: 优先复用已开页面(SSE)；必要时结束旧进程并固定端口');
       if (args.open) {
         try {

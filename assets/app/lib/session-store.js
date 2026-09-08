@@ -31,6 +31,10 @@ function baselineDir(sessionId) {
   return path.join(sessionDir(sessionId), 'baseline');
 }
 
+function afterDir(sessionId) {
+  return path.join(sessionDir(sessionId), 'after');
+}
+
 function normalizeRel(filePath) {
   const normalized = path.normalize(String(filePath || '')).replace(/\\/g, '/');
   if (!normalized || normalized === '.' || normalized.startsWith('../') || normalized.includes('/../') || path.isAbsolute(normalized)) {
@@ -126,6 +130,7 @@ async function createSession({ workspace, title = '', files = [], note = '' }) {
     throw err;
   }
 
+  const previousSessionId = await getLatestSessionId();
   const sessionId = nowId();
   const dir = sessionDir(sessionId);
   ensureDirSync(baselineDir(sessionId));
@@ -179,6 +184,7 @@ async function createSession({ workspace, title = '', files = [], note = '' }) {
     mode: 'session',
     files: tracked,
     closed: false,
+    afterCapturedAt: null,
     changeSummary: '',
     changedFileCount: 0,
     stats: { added: 0, modified: 0, deleted: 0, additions: 0, deletions: 0 },
@@ -186,6 +192,14 @@ async function createSession({ workspace, title = '', files = [], note = '' }) {
     summaryUpdatedAt: null,
   };
   await writeJson(metaPath(sessionId), meta);
+  if (previousSessionId && previousSessionId !== sessionId) {
+    try {
+      // 此时上一轮仍是 latest，把当时工作区冻成它的「改完后」快照
+      await captureAfterSnapshot(previousSessionId, { refresh: false });
+    } catch {
+      // 冻结上一轮失败不应阻断新 session
+    }
+  }
   await writeJson(path.join(SESSIONS_ROOT, 'latest.json'), {
     sessionId,
     workspaceRoot,
@@ -263,21 +277,95 @@ async function captureCurrentTree(sessionId, extraFiles = []) {
   return loadSession(sessionId);
 }
 
-async function readBaselineText(sessionId, relPath) {
-  const baseFile = path.join(baselineDir(sessionId), relPath);
+async function readSnapshotText(snapshotRoot, relPath) {
+  const baseFile = path.join(snapshotRoot, relPath);
   if (await pathExists(baseFile)) {
     return readTextMaybe(baseFile);
   }
-  const binMeta = path.join(baselineDir(sessionId), `${relPath}.__binary_meta.json`);
+  const binMeta = path.join(snapshotRoot, `${relPath}.__binary_meta.json`);
   if (await pathExists(binMeta)) {
     return { exists: true, binary: true, text: '' };
   }
   return { exists: false, binary: false, text: '' };
 }
 
+async function snapshotWorkspaceFile(workspaceRoot, snapshotRoot, rel) {
+  const abs = resolveUnderRoot(workspaceRoot, rel);
+  const dest = path.join(snapshotRoot, rel);
+  const exists = await pathExists(abs);
+  if (!exists) {
+    return { path: rel, exists: false, binary: false };
+  }
+  const st = await fsp.stat(abs);
+  if (st.isDirectory()) return null;
+  const sample = await fsp.readFile(abs).catch(() => null);
+  const binary = !!(sample && sample.includes(0));
+  if (binary) {
+    await writeJson(path.join(snapshotRoot, `${rel}.__binary_meta.json`), {
+      binary: true,
+      size: st.size,
+      mtimeMs: st.mtimeMs,
+    });
+  } else {
+    await copyFilePreserve(abs, dest);
+  }
+  return { path: rel, exists: true, binary };
+}
+
+async function captureAfterSnapshot(sessionId, options = {}) {
+  const meta = await loadSession(sessionId);
+  const latestId = await getLatestSessionId();
+  const isLatest = latestId === sessionId;
+  const already = Boolean(meta.afterCapturedAt);
+  const refresh = options.refresh !== false;
+  const force = !!options.force;
+
+  // 非当前会话：工作区已经不是该回合结束态，禁止用「现在」冒充「当时改完后」
+  if (!isLatest && !force) {
+    return { captured: false, reason: already ? 'frozen' : 'not-latest', session: meta };
+  }
+  if (already && !refresh && !force) {
+    return { captured: false, reason: 'already', session: meta };
+  }
+
+  const root = afterDir(sessionId);
+  if (already) {
+    await fsp.rm(root, { recursive: true, force: true });
+  }
+  ensureDirSync(root);
+
+  for (const f of meta.files || []) {
+    await snapshotWorkspaceFile(meta.workspaceRoot, root, f.path);
+  }
+
+  const next = await updateSessionMeta(sessionId, {
+    afterCapturedAt: new Date().toISOString(),
+  });
+  return {
+    captured: true,
+    reason: already ? 'refreshed' : 'created',
+    session: next,
+  };
+}
+
+async function readBaselineText(sessionId, relPath) {
+  return readSnapshotText(baselineDir(sessionId), relPath);
+}
+
+async function readAfterText(sessionId, relPath) {
+  return readSnapshotText(afterDir(sessionId), relPath);
+}
+
 async function readCurrentText(workspaceRoot, relPath) {
   const abs = resolveUnderRoot(workspaceRoot, relPath);
   return readTextMaybe(abs);
+}
+
+async function readSessionNewText(session, relPath) {
+  if (session.afterCapturedAt) {
+    return readAfterText(session.sessionId, relPath);
+  }
+  return readCurrentText(session.workspaceRoot, relPath);
 }
 
 
@@ -377,8 +465,11 @@ module.exports = {
   getLatestSessionId,
   trackFiles,
   captureCurrentTree,
+  captureAfterSnapshot,
   readBaselineText,
+  readAfterText,
   readCurrentText,
+  readSessionNewText,
   revertFile,
   revertFiles,
   updateSessionMeta,
@@ -388,4 +479,5 @@ module.exports = {
   sessionDir,
   metaPath,
   baselineDir,
+  afterDir,
 };

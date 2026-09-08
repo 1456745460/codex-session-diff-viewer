@@ -45,6 +45,7 @@ scripts/session_diff.sh begin \
 - `--files`：本回合计划修改或新建的相对路径（逗号/空格分隔）
 - 已存在文件：复制当前内容作为“本回合编码前”
 - 尚不存在文件：基线记为缺失，最终会显示为“新增”
+- 若上一轮还没有 after 快照，会顺手用当时工作区把它冻成「上一轮改完后」
 - 命令 stdout 输出**新的** `sessionId`（保存备用；本回合收尾优先用它）
 
 > 注意：即使同一聊天线程里上一轮已经 begin 过，本回合也要重新 begin。
@@ -67,6 +68,9 @@ scripts/session_diff.sh summarize --session <本回合sessionId|latest> --summar
 scripts/session_diff.sh open --session <本回合sessionId|latest>
 ```
 
+- `summarize` / `open` 会把工作区当前内容冻成该 session 的 **after 快照**（本回合改完后）
+- 之后查看该会话（含切换历史下拉）始终对比 **baseline vs after**，不会再读工作区最新文件
+- 同一回合对 latest 再次 summarize/open 会刷新 after；一旦开始了新 session，上一轮 after 冻结不再覆盖
 - `open` 会先基于**本回合** session diff 生成智能改动概括并写入 `meta.json`
 - 启动本地网页并自动打开浏览器
 - stdout 打印可点击 URL，例如 `http://127.0.0.1:3847`
@@ -117,7 +121,9 @@ scripts/session_diff.sh status --session <本回合sessionId|latest>
 
 ## 关键约束
 
-- 对比源：`~/.codex/session-diffs/<sessionId>/baseline` vs 工作区当前文件
+- 对比源：`~/.codex/session-diffs/<sessionId>/baseline` vs `after`（本回合收尾冻结的改完后快照）
+- 切换历史会话时必须看到「当时版本 1 vs 当时版本 2」，禁止拿历史 baseline 对工作区最新文件做 diff
+- 回合尚未 summarize/open 时，才允许临时对比 baseline vs 工作区当前（未冻结）
 - 不要用 `git diff HEAD`、`git diff --staged` 充当“此次变更”
 - 不要把上一轮 session 的累计变更当作本回合 diff
 - 仅本机 `127.0.0.1`，适合本地自用

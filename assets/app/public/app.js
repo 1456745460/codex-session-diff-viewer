@@ -1038,7 +1038,10 @@
       persistPrefs();
     }
     if (summary.mode === 'session') {
-      el.repoMeta.textContent = `会话 ${summary.sessionId} · ${summary.workspaceRoot || summary.repoRoot}`;
+      const compareLabel = summary.compareSource === 'after'
+        ? '编码前 vs 本回合后快照'
+        : '编码前 vs 工作区当前（本回合尚未冻结）';
+      el.repoMeta.textContent = `会话 ${summary.sessionId} · ${compareLabel} · ${summary.workspaceRoot || summary.repoRoot}`;
     } else {
       el.repoMeta.textContent = `${summary.branch} @ ${summary.head} · ${summary.repoRoot}`;
     }
@@ -1337,6 +1340,9 @@
     const hideLn = !state.showLineNo;
     const highlightMaps = buildLineHighlightMaps(diff);
     const expanded = new Set();
+    const afterLabel = (diff.compareSource || state.summary?.compareSource) === 'workspace'
+      ? '工作区当前'
+      : '本回合后';
 
     function paint() {
       let leftBody = '';
@@ -1414,7 +1420,7 @@
         <div class="diff-pane-labels split-labels">
           <div class="pane-label"><strong>编码前</strong>${escapeHtml(diff.oldPath || diff.path)}</div>
           <div class="pane-label pane-label-gap" aria-hidden="true"></div>
-          <div class="pane-label"><strong>本次后</strong>${escapeHtml(diff.path)}</div>
+          <div class="pane-label"><strong>${afterLabel}</strong>${escapeHtml(diff.path)}</div>
         </div>
         <div class="diff-scroll-host split" id="diffScrollHost">
           <div class="diff-scroll" id="diffScrollLeft">

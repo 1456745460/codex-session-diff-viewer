@@ -5,7 +5,8 @@ const {
   listSessions,
   getLatestSessionId,
   readBaselineText,
-  readCurrentText,
+  readSessionNewText,
+  captureAfterSnapshot,
   trackFiles,
   normalizeRel,
   deriveProjectName,
@@ -256,7 +257,7 @@ function classifyStatus(baselineExists, currentExists, changed) {
 
 async function buildFileEntry(session, relPath, opts = { includeUnchanged: false }) {
   const baseline = await readBaselineText(session.sessionId, relPath);
-  const current = await readCurrentText(session.workspaceRoot, relPath);
+  const current = await readSessionNewText(session, relPath);
 
   if (baseline.binary || current.binary) {
     const status = classifyStatus(baseline.exists, current.exists, true);
@@ -391,6 +392,12 @@ async function collectChangedFiles(sessionId) {
 }
 
 async function finalizeSessionInsights(sessionId, options = {}) {
+  if (options.captureAfter) {
+    await captureAfterSnapshot(sessionId, {
+      refresh: options.refreshAfter !== false,
+      force: !!options.forceAfter,
+    });
+  }
   const { session, files } = await collectChangedFiles(sessionId);
   const projectName = deriveProjectName(session.workspaceRoot) || session.projectName || 'project';
   const stats = {
@@ -435,6 +442,8 @@ async function finalizeSessionInsights(sessionId, options = {}) {
     changedFileCount: files.length,
     stats,
     summarySource,
+    afterCapturedAt: session.afterCapturedAt || meta.afterCapturedAt || null,
+    compareSource: (session.afterCapturedAt || meta.afterCapturedAt) ? 'after' : 'workspace',
     files,
     meta,
   };
@@ -471,6 +480,8 @@ async function listSessionCards(limit = 100, options = {}) {
       stats: card.stats || null,
       summarySource: card.summarySource || '',
       note: card.note || '',
+      afterCapturedAt: card.afterCapturedAt || null,
+      compareSource: card.afterCapturedAt ? 'after' : 'workspace',
     });
   }
   return cards;
@@ -497,6 +508,7 @@ async function getSessionSummary(sessionId, options = {}) {
     const insight = await finalizeSessionInsights(sessionId, {
       summary: options.summary,
       force: !!options.forceSummary,
+      captureAfter: true,
     });
     changeSummary = insight.changeSummary;
   } else if (!changeSummary) {
@@ -514,6 +526,8 @@ async function getSessionSummary(sessionId, options = {}) {
     changedFileCount: files.length,
     createdAt: latest.createdAt,
     updatedAt: latest.updatedAt,
+    afterCapturedAt: latest.afterCapturedAt || null,
+    compareSource: latest.afterCapturedAt ? 'after' : 'workspace',
     branch: 'session',
     head: latest.sessionId.slice(0, 12),
     files,
@@ -543,7 +557,8 @@ async function getSessionFileDiff(sessionId, filePath) {
   }
 
   const baseline = await readBaselineText(sessionId, rel);
-  const current = await readCurrentText(session.workspaceRoot, rel);
+  const current = await readSessionNewText(session, rel);
+  const compareSource = session.afterCapturedAt ? 'after' : 'workspace';
 
   if (baseline.binary || current.binary) {
     return {
@@ -557,6 +572,8 @@ async function getSessionFileDiff(sessionId, filePath) {
       sideBySide: [],
       stats: { additions: 0, deletions: 0 },
       language: guessLanguage(rel),
+      compareSource,
+      afterCapturedAt: session.afterCapturedAt || null,
     };
   }
 
@@ -572,6 +589,8 @@ async function getSessionFileDiff(sessionId, filePath) {
     oldText,
     newText,
     language: guessLanguage(rel),
+    compareSource,
+    afterCapturedAt: session.afterCapturedAt || null,
     ...built,
   };
 }

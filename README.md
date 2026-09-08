@@ -4,7 +4,8 @@
 
 > 这不是 `git diff`，也不是工作区相对 HEAD 的变更。  
 > 也不是整条聊天线程的累计 diff。  
-> 它只对比：**本回合 begin 时的文件快照** ↔ **本回合改完后的当前文件**。  
+> 它只对比：**本回合 begin 时的文件快照** ↔ **本回合收尾时冻结的改完后快照**。  
+> 切换历史会话时看到的是当时那一轮的两个版本，不会变成「当时 vs 工作区最新」。  
 > **规则：一轮对话 = 一个 session；每轮改代码前必须重新 begin。**
 
 默认查看地址：`http://127.0.0.1:3847`（**单实例 + 标签复用**：已开页面则 SSE 切到最新会话，不新开标签）
@@ -238,6 +239,7 @@ scripts/session_diff.sh summarize --session latest --summary "修复登录态过
 
 - 不传 `--summary`：自动根据 diff 智能概括
 - 传入 `--summary`：使用你的手动概括（更准确）
+- 若该 session 仍是当前回合（latest），会同时把工作区内容冻成 `after/**`
 
 ### open
 
@@ -312,11 +314,13 @@ scripts/session_diff.sh open --session latest --no-open   # 只启动服务，�
 ~/.codex/session-diffs/
 ├── latest.json
 └── <sessionId>/
-    ├── meta.json          # 工作区、文件列表、概括、统计
-    └── baseline/**        # 编码前文件快照
+    ├── meta.json          # 工作区、文件列表、概括、统计、afterCapturedAt
+    ├── baseline/**        # 编码前文件快照（版本 1）
+    └── after/**           # 本回合改完后快照（版本 2）
 ```
 
-- 对比源：`baseline/**` vs 工作区当前文件
+- 对比源：`baseline/**` vs `after/**`
+- 尚未 summarize/open（也还没被下一轮 begin 冻结）时，才临时对比工作区当前文件
 - 未变化文件不会出现在列表中
 
 ---
@@ -361,7 +365,11 @@ scripts/session_diff.sh list
 scripts/session_diff.sh open --session <sessionId>
 ```
 
-也可在网页左上角会话下拉中切换。
+也可在网页左上角会话下拉中切换。每个历史会话显示的是该轮自己的 baseline vs after，同一文件后来再改也不会串进旧会话。
+
+### Q6：为什么以前切换会话会看到「当时 vs 最新」？
+
+旧实现右侧读的是工作区当前文件。现在 summarize/open（以及下一轮 begin）会冻结 `after/**`，历史会话不再跟随最新文件变化。升级前已经存在、且从未冻结过 after 的旧会话，仍可能回退到工作区当前；新产生的会话不会。
 
 ---
 

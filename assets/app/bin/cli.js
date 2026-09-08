@@ -29,11 +29,11 @@ codex-session-diff
       补充跟踪新文件（若文件已存在则抓当前内容为基线；用于“刚创建前”应先 track 再写）
 
   open [--session latest|<id>] [--port 3847] [--no-open]
-      启动/复用查看器；默认会先生成/刷新本会话改动概括
+      启动/复用查看器；当前回合会先冻结「改完后」快照再刷新概括
       单实例固定端口；若浏览器标签已打开则 SSE 切到最新会话，不新开标签
 
   summarize [--session latest|<id>] [--summary "手动概括"] [--json]
-      基于本次会话 diff 生成智能改动概括并写入 meta
+      冻结本回合「改完后」快照，并基于 baseline vs after 写入概括
 
   status [--session latest|<id>]
       输出会话摘要 JSON
@@ -132,6 +132,7 @@ async function cmdSummarize(args) {
   const insight = await finalizeSessionInsights(sessionId, {
     summary: args.summary || '',
     force: !!args.force || !args.summary,
+    captureAfter: true,
   });
   if (args.json) {
     console.log(JSON.stringify(insight, null, 2));
@@ -242,6 +243,7 @@ async function cmdOpen(args) {
     const insight = await finalizeSessionInsights(sessionId, {
       summary: args.summary || '',
       force: !!args.force,
+      captureAfter: true,
     });
     console.error(`changeSummary: ${insight.changeSummary}`);
   } catch (e) {
