@@ -5,6 +5,7 @@ const express = require('express');
 const open = require('open');
 const { getSessionSummary, getSessionFileDiff, resolveSessionId, listSessionCards, finalizeSessionInsights } = require('./lib/session-diff');
 const { loadSession, revertFiles, revertFile } = require('./lib/session-store');
+const { getViewerIdentity } = require('./lib/viewer-identity');
 
 function parseArgs(argv) {
   const args = {
@@ -119,6 +120,7 @@ async function createApp(defaultSessionId) {
   app.use(express.static(publicDir));
 
   let activeDefaultSessionId = defaultSessionId || null;
+  const identity = getViewerIdentity(__dirname);
   /** @type {Set<import('http').ServerResponse>} */
   const sseClients = new Set();
 
@@ -157,6 +159,7 @@ async function createApp(defaultSessionId) {
         defaultSessionId: sessionId,
         clients: sseClients.size,
         live: sseClients.size > 0,
+        ...identity,
       });
     } catch (error) {
       res.json({
@@ -166,6 +169,7 @@ async function createApp(defaultSessionId) {
         clients: sseClients.size,
         live: sseClients.size > 0,
         error: error.message,
+        ...identity,
       });
     }
   });
@@ -177,6 +181,7 @@ async function createApp(defaultSessionId) {
       live: sseClients.size > 0,
       defaultSessionId: activeDefaultSessionId,
       pid: process.pid,
+      ...identity,
     });
   });
 

@@ -16,6 +16,7 @@ const {
   finalizeSessionInsights,
   listSessionCards,
 } = require('../lib/session-diff');
+const { getViewerIdentity, describeViewerCompatibility } = require('../lib/viewer-identity');
 
 function printHelp() {
   console.log(`
@@ -31,6 +32,7 @@ codex-session-diff
   open [--session latest|<id>] [--port 3847] [--no-open]
       启动/复用查看器；当前回合会先冻结「改完后」快照再刷新概括
       单实例固定端口；若浏览器标签已打开则 SSE 切到最新会话，不新开标签
+      已运行服务缺少 after 快照协议或代码指纹不匹配时会重启，避免历史会话读工作区最新文件
 
   summarize [--session latest|<id>] [--summary "手动概括"] [--json]
       冻结本回合「改完后」快照，并基于 baseline vs after 写入概括
@@ -145,6 +147,21 @@ async function cmdSummarize(args) {
   }
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitForLiveClients(url, { attempts = 12, waitMs = 150 } = {}) {
+  for (let i = 0; i < attempts; i += 1) {
+    const health = await httpJson('GET', `${url}/api/health`, null, 400);
+    if (health && health.ok && health.data && (health.data.live || (health.data.clients || 0) > 0)) {
+      return health.data;
+    }
+    await sleep(waitMs);
+  }
+  return null;
+}
+
 function httpJson(method, url, body, timeoutMs = 1200) {
   return new Promise((resolve) => {
     let settled = false;
@@ -208,9 +225,22 @@ function httpJson(method, url, body, timeoutMs = 1200) {
 
 async function focusExistingServer(port, sessionId) {
   const base = `http://127.0.0.1:${port}`;
+  const expected = getViewerIdentity(path.join(__dirname, '..'));
   const health = await httpJson('GET', `${base}/api/health`, null, 900);
   if (!health || !health.ok || !health.data || health.data.ok !== true) {
     return null;
+  }
+  const compatibility = describeViewerCompatibility(health.data, expected);
+  if (!compatibility.ok) {
+    return {
+      url: base,
+      live: !!(health.data.live || (health.data.clients || 0) > 0),
+      clients: health.data.clients || 0,
+      sessionId,
+      stale: true,
+      staleReason: compatibility.reason,
+      legacy: false,
+    };
   }
   const focused = await httpJson(
     'POST',
@@ -254,9 +284,9 @@ async function cmdOpen(args) {
   const url = `http://127.0.0.1:${port}`;
   const shouldOpenBrowser = !args.noOpen;
 
-  // 1) 优先复用已运行服务 + 已打开浏览器标签（SSE）
+  // 1) 优先复用已运行且协议兼容的服务 + 已打开浏览器标签（SSE）
   const existing = await focusExistingServer(port, sessionId);
-  if (existing && !existing.legacy) {
+  if (existing && !existing.legacy && !existing.stale) {
     console.log(existing.url);
     if (existing.live) {
       console.error(
@@ -276,7 +306,11 @@ async function cmdOpen(args) {
     }
     return;
   }
-  if (existing && existing.legacy) {
+  if (existing && existing.stale) {
+    console.error(
+      `检测到过期查看器（${existing.staleReason}），将重启以加载 baseline vs after 快照逻辑...`,
+    );
+  } else if (existing && existing.legacy) {
     console.error('检测到旧版查看器（无标签复用能力），将重启为新版单实例服务...');
   }
 
@@ -296,11 +330,19 @@ async function cmdOpen(args) {
     settled = true;
     console.log(readyUrl);
     if (shouldOpenBrowser) {
-      try {
-        await open(readyUrl);
-        console.error('已打开浏览器');
-      } catch (e) {
-        console.error(`打开浏览器失败: ${e.message}`);
+      const live = existing ? await waitForLiveClients(readyUrl) : null;
+      if (live) {
+        await httpJson('POST', `${readyUrl}/api/focus`, { sessionId, reason: 'cli-open-restart' }, 800);
+        console.error(
+          `查看器已重启并复用浏览器标签：切换到会话 ${sessionId}（clients=${live.clients || 0}）`,
+        );
+      } else {
+        try {
+          await open(readyUrl);
+          console.error('已打开浏览器');
+        } catch (e) {
+          console.error(`打开浏览器失败: ${e.message}`);
+        }
       }
     }
     child.unref();
