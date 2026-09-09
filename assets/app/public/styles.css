@@ -233,7 +233,7 @@ input {
 #repoMeta {
   display: block;
   max-width: none;
-  white-space: normal;
+  white-space: pre-line;
   overflow: visible;
   text-overflow: unset;
   word-break: break-all;
@@ -793,6 +793,23 @@ body.is-resizing-sidebar {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+  transition: color .15s;
+}
+
+.file-path:hover {
+  color: var(--accent, #6cb6ff);
+}
+
+.file-path.copied {
+  color: var(--accent, #6cb6ff);
+}
+
+.file-path.copied::after {
+  content: '  ✓ 已复制';
+  font-size: 11px;
+  opacity: .8;
 }
 
 .diff-stats {

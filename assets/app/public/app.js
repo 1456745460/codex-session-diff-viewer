@@ -1041,7 +1041,7 @@
       const compareLabel = summary.compareSource === 'after'
         ? '编码前 vs 本回合后快照'
         : '编码前 vs 工作区当前（本回合尚未冻结）';
-      el.repoMeta.textContent = `会话 ${summary.sessionId} · ${compareLabel} · ${summary.workspaceRoot || summary.repoRoot}`;
+      el.repoMeta.textContent = `会话 ${summary.sessionId} · ${compareLabel}\n· ${summary.workspaceRoot || summary.repoRoot}`;
     } else {
       el.repoMeta.textContent = `${summary.branch} @ ${summary.head} · ${summary.repoRoot}`;
     }
@@ -1103,7 +1103,7 @@
         ? `${diff.oldPath} → ${diff.path}`
         : diff.path;
     el.filePathLabel.textContent = pathText;
-    el.filePathLabel.classList.toggle('hidden', !state.showPath);
+    el.filePathLabel.classList.remove('hidden');
     if (diff.binary) {
       el.fileDiffStats.innerHTML = '二进制文件';
     } else {
@@ -1721,7 +1721,28 @@
       state.showPath = el.showPath.checked;
       persistPrefs();
       renderFileList();
-      if (state.fileDiff) renderFileHeader(state.fileDiff);
+    });
+    el.filePathLabel.title = '点击复制文件路径';
+    el.filePathLabel.addEventListener('click', async () => {
+      const text = el.filePathLabel.textContent;
+      if (!text) return;
+      try {
+        await navigator.clipboard.writeText(text);
+      } catch {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+      }
+      el.filePathLabel.classList.add('copied');
+      clearTimeout(el.filePathLabel._copiedTimer);
+      el.filePathLabel._copiedTimer = setTimeout(() => {
+        el.filePathLabel.classList.remove('copied');
+      }, 1500);
     });
     el.fontFamily.addEventListener('change', () => {
       state.fontFamily = el.fontFamily.value || DEFAULT_FONT_FAMILY;
