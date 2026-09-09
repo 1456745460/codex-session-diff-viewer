@@ -1007,10 +1007,53 @@ body.is-resizing-sidebar {
 
 .diff-scroll {
   height: 100%;
-  overflow: auto;
+  min-width: 0;
+  overflow: hidden;
   background: var(--bg-editor);
   position: relative;
   z-index: 1;
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+}
+
+.diff-gutter-pane {
+  flex: 0 0 auto;
+  min-height: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  background: var(--bg-editor);
+  border-right: 1px solid var(--border-soft);
+  z-index: 2;
+}
+
+.diff-gutter-pane::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+.diff-code-pane {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.diff-gutter-endcap {
+  flex: 0 0 auto;
+  width: 100%;
+  height: 0;
+  pointer-events: none;
 }
 
 .diff-scroll-host.split .diff-scroll {
@@ -1025,18 +1068,36 @@ body.is-resizing-sidebar {
   /* 至少铺满可见区域；有长行时按内容最大宽度撑开，边框跟随内容全宽 */
   width: max-content;
   min-width: 100%;
-  border-collapse: collapse;
+  border-collapse: separate;
+  border-spacing: 0;
   font-family: var(--diff-font-family);
   font-size: var(--diff-font-size);
   line-height: var(--diff-line-height);
   table-layout: auto;
 }
 
+.diff-gutter-table {
+  width: max-content;
+  min-width: 0;
+  flex: 0 0 auto;
+}
+
+.diff-code-table {
+  width: max-content;
+  min-width: 100%;
+}
+
 .diff-table td {
   vertical-align: top;
   padding: 0;
   white-space: pre;
-  border: 0;
+  box-sizing: border-box;
+  height: calc(var(--diff-line-height) + 2px);
+  line-height: var(--diff-line-height);
+  border-top: 1px solid transparent;
+  border-bottom: 1px solid transparent;
+  border-left: 0;
+  border-right: 0;
 }
 
 .ln {
@@ -1048,9 +1109,10 @@ body.is-resizing-sidebar {
   color: var(--line-no);
   user-select: none;
   background: rgba(0, 0, 0, 0.12);
+}
+
+.diff-table td.ln {
   border-right: 1px solid var(--border-soft);
-  position: sticky;
-  left: 0;
 }
 
 .gutter {

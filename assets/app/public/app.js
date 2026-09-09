@@ -1234,16 +1234,44 @@
     return n == null ? '' : String(n);
   }
 
+  function paneCodeEl(scrollEl) {
+    return scrollEl?.querySelector('.diff-code-pane') || scrollEl;
+  }
+
+  function queryPanePair(scrollId) {
+    const root = document.getElementById(scrollId);
+    if (!root) return { root: null, gutter: null, code: null };
+    return {
+      root,
+      gutter: root.querySelector('.diff-gutter-pane'),
+      code: root.querySelector('.diff-code-pane'),
+    };
+  }
+
+  function wrapDiffPane(id, gutterBody, codeBody, hideLn) {
+    return `
+      <div class="diff-scroll" id="${id}">
+        <div class="diff-gutter-pane">
+          <table class="diff-table diff-gutter-table ${hideLn ? 'hide-ln' : ''}"><tbody>${gutterBody}</tbody></table>
+          <div class="diff-gutter-endcap" aria-hidden="true"></div>
+        </div>
+        <div class="diff-code-pane">
+          <table class="diff-table diff-code-table"><tbody>${codeBody}</tbody></table>
+        </div>
+      </div>
+    `;
+  }
+
   function renderUnified(diff) {
     const blocks = collapseRows(diff.unified || [], (r) => r.type);
     const hideLn = !state.showLineNo;
     const highlightMaps = buildLineHighlightMaps(diff);
 
-    let body = '';
     let expanded = new Set();
 
     function paint() {
-      body = '';
+      let gutterBody = '';
+      let codeBody = '';
       let rowCursor = 0;
       const unifiedBlockIds = assignDiffBlockIds(diff.unified || [], (r) => r.type);
       const indexedSequence = [];
@@ -1276,11 +1304,15 @@
 
       for (const block of indexedSequence) {
         if (block.kind === 'hunk') {
-          body += `
-            <tr class="row-hunk" data-hunk="${block.from}-${block.to}">
+          const hunkAttr = `class="row-hunk" data-hunk="${block.from}-${block.to}"`;
+          gutterBody += `
+            <tr ${hunkAttr}>
               <td class="ln"></td>
               <td class="ln"></td>
               <td class="gutter">⋮</td>
+            </tr>`;
+          codeBody += `
+            <tr ${hunkAttr}>
               <td class="code">⋯ 收起了 ${block.hidden} 行未更改内容，点击展开</td>
             </tr>`;
           continue;
@@ -1294,11 +1326,15 @@
         const typeBlock = blockId ? blockTypeClass(type === 'add' || type === 'del' ? type : 'mod') : '';
         const anchor = blockId ? ' row-diff-anchor row-diff-block' + edge + typeBlock : '';
         const blockAttr = blockId ? ` data-diff-block="${blockId}"` : '';
-        body += `
-          <tr class="${cls}${anchor}" data-diff-type="${type}"${blockAttr}>
+        const rowAttr = `class="${cls}${anchor}" data-diff-type="${type}"${blockAttr}`;
+        gutterBody += `
+          <tr ${rowAttr}>
             <td class="ln">${escapeHtml(lineNo(row.oldLine))}</td>
             <td class="ln">${escapeHtml(lineNo(row.newLine))}</td>
             <td class="gutter">${gutter}</td>
+          </tr>`;
+        codeBody += `
+          <tr ${rowAttr}>
             <td class="code">${
               type === 'del'
                 ? codeHtmlFromMaps(highlightMaps, 'old', row.oldLine, row.text)
@@ -1313,13 +1349,12 @@
           <div class="pane-label"><strong>本次会话统一 Diff</strong>${escapeHtml(diff.path)}</div>
         </div>
         <div class="diff-scroll-host">
-          <div class="diff-scroll" id="diffScrollMain">
-            <table class="diff-table ${hideLn ? 'hide-ln' : ''}">
-              <tbody>${body}</tbody>
-            </table>
-          </div>
+          ${wrapDiffPane('diffScrollMain', gutterBody, codeBody, hideLn)}
         </div>
       `;
+
+      bindDiffPaneScrolls(queryPanePair('diffScrollMain'), null);
+      bindDiffLayout([document.getElementById('diffScrollMain')], { connectors: false });
 
       el.diffRoot.querySelectorAll('[data-hunk]').forEach((node) => {
         node.addEventListener('click', () => {
@@ -1345,8 +1380,10 @@
       : '本回合后';
 
     function paint() {
-      let leftBody = '';
-      let rightBody = '';
+      let leftGutterBody = '';
+      let leftCodeBody = '';
+      let rightGutterBody = '';
+      let rightCodeBody = '';
 
       const splitBlockIds = assignDiffBlockIds(rows, (r) => r.type);
       const indexedSequence = [];
@@ -1376,14 +1413,20 @@
 
       for (const block of indexedSequence) {
         if (block.kind === 'hunk') {
-          const hunkRow = `
-            <tr class="row-hunk" data-hunk="${block.from}-${block.to}">
+          const hunkAttr = `class="row-hunk" data-hunk="${block.from}-${block.to}"`;
+          const hunkGutter = `
+            <tr ${hunkAttr}>
               <td class="ln"></td>
               <td class="gutter">⋮</td>
+            </tr>`;
+          const hunkCode = `
+            <tr ${hunkAttr}>
               <td class="code">⋯ 收起了 ${block.hidden} 行未更改内容，点击展开</td>
             </tr>`;
-          leftBody += hunkRow;
-          rightBody += hunkRow;
+          leftGutterBody += hunkGutter;
+          rightGutterBody += hunkGutter;
+          leftCodeBody += hunkCode;
+          rightCodeBody += hunkCode;
           continue;
         }
 
@@ -1401,17 +1444,25 @@
         const blockAttr = blockId ? ` data-diff-block="${blockId}"` : '';
         const leftGutter = leftType === 'del' ? '−' : leftType === 'add' ? '+' : row.type === 'mod' ? '~' : ' ';
         const rightGutter = rightType === 'add' ? '+' : rightType === 'del' ? '−' : row.type === 'mod' ? '~' : ' ';
+        const leftAttr = `class="${leftCls}${anchor}" data-diff-type="${row.type}"${blockAttr}`;
+        const rightAttr = `class="${rightCls}${anchor}" data-diff-type="${row.type}"${blockAttr}`;
 
-        leftBody += `
-          <tr class="${leftCls}${anchor}" data-diff-type="${row.type}"${blockAttr}>
+        leftGutterBody += `
+          <tr ${leftAttr}>
             <td class="ln">${escapeHtml(lineNo(row.left?.line))}</td>
             <td class="gutter">${leftGutter}</td>
+          </tr>`;
+        leftCodeBody += `
+          <tr ${leftAttr}>
             <td class="code">${codeHtmlFromMaps(highlightMaps, 'old', row.left?.line, row.left?.text ?? '')}</td>
           </tr>`;
-        rightBody += `
-          <tr class="${rightCls}${anchor}" data-diff-type="${row.type}"${blockAttr}>
+        rightGutterBody += `
+          <tr ${rightAttr}>
             <td class="ln">${escapeHtml(lineNo(row.right?.line))}</td>
             <td class="gutter">${rightGutter}</td>
+          </tr>`;
+        rightCodeBody += `
+          <tr ${rightAttr}>
             <td class="code">${codeHtmlFromMaps(highlightMaps, 'new', row.right?.line, row.right?.text ?? '')}</td>
           </tr>`;
       }
@@ -1423,22 +1474,18 @@
           <div class="pane-label"><strong>${afterLabel}</strong>${escapeHtml(diff.path)}</div>
         </div>
         <div class="diff-scroll-host split" id="diffScrollHost">
-          <div class="diff-scroll" id="diffScrollLeft">
-            <table class="diff-table ${hideLn ? 'hide-ln' : ''}"><tbody>${leftBody}</tbody></table>
-          </div>
+          ${wrapDiffPane('diffScrollLeft', leftGutterBody, leftCodeBody, hideLn)}
           <div class="diff-connector-rail" id="diffConnectorRail" aria-hidden="true">
             <svg class="diff-connectors" id="diffConnectors"></svg>
           </div>
-          <div class="diff-scroll" id="diffScrollRight">
-            <table class="diff-table ${hideLn ? 'hide-ln' : ''}"><tbody>${rightBody}</tbody></table>
-          </div>
+          ${wrapDiffPane('diffScrollRight', rightGutterBody, rightCodeBody, hideLn)}
         </div>
       `;
 
       const left = document.getElementById('diffScrollLeft');
       const right = document.getElementById('diffScrollRight');
-      bindSyncScroll(left, right);
-      bindConnectorUpdates(left, right);
+      bindDiffPaneScrolls(queryPanePair('diffScrollLeft'), queryPanePair('diffScrollRight'));
+      bindDiffLayout([left, right], { connectors: true });
       requestAnimationFrame(() => updateDiffConnectors());
 
       el.diffRoot.querySelectorAll('[data-hunk]').forEach((node) => {
@@ -1454,52 +1501,92 @@
     paint();
   }
 
-  function bindSyncScroll(left, right) {
-    if (!left || !right) return;
-    const onScroll = (source, target) => {
-      if (!state.syncScroll || state.mode !== 'split') return;
+  function horizontalScrollbarSize(el) {
+    if (!el) return 0;
+    return Math.max(0, el.offsetHeight - el.clientHeight);
+  }
+
+  function syncGutterEndcaps() {
+    document.querySelectorAll('.diff-scroll').forEach((root) => {
+      const code = root.querySelector('.diff-code-pane');
+      const endcap = root.querySelector('.diff-gutter-endcap');
+      if (!code || !endcap) return;
+      endcap.style.height = `${horizontalScrollbarSize(code)}px`;
+    });
+  }
+
+  function bindDiffPaneScrolls(leftPair, rightPair) {
+    const pairs = [leftPair, rightPair].filter((p) => p && p.code);
+    const items = [];
+    for (const pair of pairs) {
+      if (pair.gutter) items.push({ el: pair.gutter, kind: 'gutter', pair });
+      if (pair.code) items.push({ el: pair.code, kind: 'code', pair });
+    }
+
+    const apply = (source) => {
       if (state.syncingScroll) return;
       state.syncingScroll = true;
-      target.scrollTop = source.scrollTop;
-      target.scrollLeft = source.scrollLeft;
+      const top = source.el.scrollTop;
+      const left = source.kind === 'code' ? source.el.scrollLeft : null;
+      const syncSides = state.syncScroll && state.mode === 'split' && pairs.length === 2;
+      const targets = syncSides ? items : items.filter((item) => item.pair === source.pair);
+      for (const item of targets) {
+        if (item.el === source.el) continue;
+        item.el.scrollTop = top;
+        if (left != null && item.kind === 'code') item.el.scrollLeft = left;
+      }
       requestAnimationFrame(() => {
         state.syncingScroll = false;
         updateDiffConnectors();
       });
     };
-    left.addEventListener('scroll', () => {
-      onScroll(left, right);
-      if (!(state.syncScroll && state.mode === 'split')) updateDiffConnectors();
-    }, { passive: true });
-    right.addEventListener('scroll', () => {
-      onScroll(right, left);
-      if (!(state.syncScroll && state.mode === 'split')) updateDiffConnectors();
-    }, { passive: true });
+
+    for (const item of items) {
+      item.el.addEventListener('scroll', () => apply(item), { passive: true });
+    }
+    for (const pair of pairs) {
+      if (!pair.gutter || !pair.code) continue;
+      pair.gutter.addEventListener('wheel', (e) => {
+        if (!e.deltaX) return;
+        pair.code.scrollLeft += e.deltaX;
+      }, { passive: true });
+    }
+    syncGutterEndcaps();
   }
 
-  function bindConnectorUpdates(left, right) {
+  function bindDiffLayout(scrollRoots, { connectors } = {}) {
     if (state._connectorResizeObs) {
       try { state._connectorResizeObs.disconnect(); } catch {}
       state._connectorResizeObs = null;
     }
+    const ro = new ResizeObserver(() => {
+      syncGutterEndcaps();
+      if (connectors) updateDiffConnectors();
+    });
     const host = document.getElementById('diffScrollHost');
-    if (!host) return;
-    const ro = new ResizeObserver(() => updateDiffConnectors());
-    ro.observe(host);
-    if (left) ro.observe(left);
-    if (right) ro.observe(right);
+    if (host) ro.observe(host);
+    for (const root of scrollRoots || []) {
+      if (!root) continue;
+      ro.observe(root);
+      const code = paneCodeEl(root);
+      if (code && code !== root) ro.observe(code);
+    }
     state._connectorResizeObs = ro;
     if (!state._connectorWindowBound) {
-      window.addEventListener('resize', () => updateDiffConnectors());
+      window.addEventListener('resize', () => {
+        syncGutterEndcaps();
+        updateDiffConnectors();
+      });
       state._connectorWindowBound = true;
     }
+    syncGutterEndcaps();
   }
 
   function updateDiffConnectors() {
     const host = document.getElementById('diffScrollHost');
     const svg = document.getElementById('diffConnectors');
-    const left = document.getElementById('diffScrollLeft');
-    const right = document.getElementById('diffScrollRight');
+    const left = paneCodeEl(document.getElementById('diffScrollLeft'));
+    const right = paneCodeEl(document.getElementById('diffScrollRight'));
     if (!host || !svg || !left || !right || state.mode !== 'split') return;
 
     const hostRect = host.getBoundingClientRect();
@@ -1596,8 +1683,10 @@
   }
 
   function getDiffRootPane() {
-    if (state.mode === 'split') return document.getElementById('diffScrollLeft') || el.diffRoot;
-    return document.getElementById('diffScrollMain') || el.diffRoot;
+    if (state.mode === 'split') {
+      return paneCodeEl(document.getElementById('diffScrollLeft')) || el.diffRoot;
+    }
+    return paneCodeEl(document.getElementById('diffScrollMain')) || el.diffRoot;
   }
 
   function collectAnchors() {
@@ -1648,9 +1737,11 @@
         if (i === 0) node.classList.add('current');
       });
       if (scroll) {
-        leftRows[0]?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        document.querySelector(`#diffScrollLeft .diff-code-pane tr.row-diff-block[data-diff-block="${blockId}"]`)
+          ?.scrollIntoView({ block: 'center', behavior: 'smooth' });
         if (!state.syncScroll) {
-          rightRows[0]?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+          document.querySelector(`#diffScrollRight .diff-code-pane tr.row-diff-block[data-diff-block="${blockId}"]`)
+            ?.scrollIntoView({ block: 'center', behavior: 'smooth' });
         }
         // connectors after scroll animation starts
         setTimeout(() => updateDiffConnectors(), 80);
@@ -1663,7 +1754,8 @@
         if (i === 0) node.classList.add('current');
       });
       if (scroll) {
-        rows[0]?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        document.querySelector(`#diffScrollMain .diff-code-pane tr.row-diff-block[data-diff-block="${blockId}"]`)
+          ?.scrollIntoView({ block: 'center', behavior: 'smooth' });
       }
     }
     updateDiffConnectors();
