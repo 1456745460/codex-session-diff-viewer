@@ -1716,6 +1716,75 @@
     });
   }
 
+  function currentDiffPanePairs() {
+    if (state.mode === 'split') {
+      return [queryPanePair('diffScrollLeft'), queryPanePair('diffScrollRight')];
+    }
+    return [queryPanePair('diffScrollMain')];
+  }
+
+  function rowBox(row) {
+    if (!row) return null;
+    const cell = row.querySelector('td.code, td') || row;
+    return cell.getBoundingClientRect();
+  }
+
+  function centeredScrollTop(scroller, firstRow, lastRow) {
+    if (!scroller || !firstRow) return scroller ? scroller.scrollTop : 0;
+    const scrollerRect = scroller.getBoundingClientRect();
+    const firstRect = rowBox(firstRow);
+    const lastRect = rowBox(lastRow || firstRow);
+    if (!firstRect || !lastRect) return scroller.scrollTop;
+    const viewHeight = scroller.clientHeight;
+    const current = scroller.scrollTop;
+    const blockHeight = lastRect.bottom - firstRect.top;
+    let next;
+    if (blockHeight >= viewHeight - 32) {
+      next = current + (firstRect.top - scrollerRect.top) - 24;
+    } else {
+      const blockCenter = (firstRect.top + lastRect.bottom) / 2;
+      const viewCenter = scrollerRect.top + viewHeight / 2;
+      next = current + (blockCenter - viewCenter);
+    }
+    const max = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+    return Math.max(0, Math.min(max, next));
+  }
+
+  function setPaneScrollTop(pane, top, smooth) {
+    if (!pane) return;
+    if (smooth && typeof pane.scrollTo === 'function') {
+      pane.scrollTo({ top, left: pane.scrollLeft, behavior: 'smooth' });
+      return;
+    }
+    pane.scrollTop = top;
+  }
+
+  function scrollDiffBlockIntoView(blockId) {
+    const pairs = currentDiffPanePairs();
+    state.syncingScroll = true;
+    for (const pair of pairs) {
+      const codeRows = pair.code
+        ? Array.from(pair.code.querySelectorAll(`tr.row-diff-block[data-diff-block="${blockId}"]`))
+        : [];
+      const gutterRows = pair.gutter
+        ? Array.from(pair.gutter.querySelectorAll(`tr.row-diff-block[data-diff-block="${blockId}"]`))
+        : [];
+      const rows = codeRows.length ? codeRows : gutterRows;
+      const scroller = pair.code || pair.gutter;
+      if (!scroller || !rows.length) continue;
+      const top = centeredScrollTop(scroller, rows[0], rows[rows.length - 1]);
+      setPaneScrollTop(pair.code, top, true);
+      setPaneScrollTop(pair.gutter, top, true);
+    }
+    window.clearTimeout(state._diffNavScrollTimer);
+    state._diffNavScrollTimer = window.setTimeout(() => {
+      state.syncingScroll = false;
+      updateDiffConnectors();
+    }, 380);
+    setTimeout(() => updateDiffConnectors(), 80);
+    setTimeout(() => updateDiffConnectors(), 220);
+  }
+
   function highlightCurrentAnchor(scroll) {
     clearBlockHighlight();
     if (state.currentDiffIndex < 0 || !state.diffAnchors[state.currentDiffIndex]) {
@@ -1736,28 +1805,14 @@
         node.classList.add('current-block');
         if (i === 0) node.classList.add('current');
       });
-      if (scroll) {
-        document.querySelector(`#diffScrollLeft .diff-code-pane tr.row-diff-block[data-diff-block="${blockId}"]`)
-          ?.scrollIntoView({ block: 'center', behavior: 'smooth' });
-        if (!state.syncScroll) {
-          document.querySelector(`#diffScrollRight .diff-code-pane tr.row-diff-block[data-diff-block="${blockId}"]`)
-            ?.scrollIntoView({ block: 'center', behavior: 'smooth' });
-        }
-        // connectors after scroll animation starts
-        setTimeout(() => updateDiffConnectors(), 80);
-        setTimeout(() => updateDiffConnectors(), 220);
-      }
     } else {
       const rows = Array.from(document.querySelectorAll(`#diffScrollMain tr.row-diff-block[data-diff-block="${blockId}"]`));
       rows.forEach((node, i) => {
         node.classList.add('current-block');
         if (i === 0) node.classList.add('current');
       });
-      if (scroll) {
-        document.querySelector(`#diffScrollMain .diff-code-pane tr.row-diff-block[data-diff-block="${blockId}"]`)
-          ?.scrollIntoView({ block: 'center', behavior: 'smooth' });
-      }
     }
+    if (scroll) scrollDiffBlockIntoView(blockId);
     updateDiffConnectors();
   }
 
