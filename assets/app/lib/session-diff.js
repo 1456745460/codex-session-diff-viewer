@@ -8,6 +8,7 @@ const {
   readSessionNewText,
   captureAfterSnapshot,
   trackFiles,
+  syncDiscoveredFiles,
   normalizeRel,
   deriveProjectName,
   updateSessionMeta,
@@ -381,6 +382,7 @@ function generateChangeSummary(files, options = {}) {
 }
 
 async function collectChangedFiles(sessionId) {
+  await syncDiscoveredFiles(sessionId);
   const latest = await loadSession(sessionId);
   const files = [];
   for (const f of latest.files) {
@@ -494,6 +496,7 @@ async function getSessionSummary(sessionId, options = {}) {
   if (options.extraFiles?.length) {
     await trackFiles(sessionId, options.extraFiles);
   }
+  await syncDiscoveredFiles(sessionId);
   const latest = await loadSession(sessionId);
   const files = [];
   for (const f of latest.files) {
@@ -546,11 +549,15 @@ async function getSessionSummary(sessionId, options = {}) {
 }
 
 async function getSessionFileDiff(sessionId, filePath) {
-  const session = await loadSession(sessionId);
+  let session = await loadSession(sessionId);
   const rel = normalizeRel(filePath);
-  const known = session.files.some((f) => f.path === rel);
+  let known = session.files.some((f) => f.path === rel);
   if (!known) {
-    // If file is not tracked, treat as potential new file in this session only when requested via track.
+    await syncDiscoveredFiles(sessionId);
+    session = await loadSession(sessionId);
+    known = session.files.some((f) => f.path === rel);
+  }
+  if (!known) {
     const err = new Error(`会话未跟踪该文件: ${rel}`);
     err.code = 'FILE_NOT_FOUND';
     throw err;

@@ -77,19 +77,14 @@ chmod +x ~/.codex/skills/codex-session-diff-viewer/scripts/session_diff.sh
 ## 3. 最短使用流程（必会）
 
 ```bash
-# 1) 本回合改文件前：新建 session 并拍基线（每轮都要重新 begin）
+# 1) 本回合改文件前：新建 session、快照工作区并开始监听（每轮都要重新 begin）
 "$HOME/.codex/skills/codex-session-diff-viewer/scripts/session_diff.sh" begin \
   --workspace "/abs/path/to/project" \
-  --files "src/a.js,src/b.ts,docs/readme.md"
+  --title "本回合任务一句话"
 
-# 2) 正常编码、改文件...
+# 2) 正常编码、改文件...（不必再 track）
 
-# 3) 若中途要改未跟踪文件：先 track 再改
-"$HOME/.codex/skills/codex-session-diff-viewer/scripts/session_diff.sh" track \
-  --session latest \
-  --files "src/new-file.js"
-
-# 4) 收尾：写概括 + 打开网页
+# 3) 收尾：写概括 + 打开网页
 "$HOME/.codex/skills/codex-session-diff-viewer/scripts/session_diff.sh" summarize \
   --session latest \
   --summary "一句话概括本次改动"
@@ -131,21 +126,19 @@ http://127.0.0.1:3847
 
 - **一轮对话 / 本回合**：用户的一次请求 + 你为完成该请求进行的编码，直到本轮最终回复。
 - **禁止**把整条聊天线程从头到尾复用同一个 session。
-- **禁止**在新的用户请求里继续 `track --session latest` 挂到上一轮 session（除非用户明确要求对比跨多轮总变更）。
+- 不必预列 `--files`，也不必中途 `track`：begin 会快照并监听工作区，收尾自动发现本回合改过的文件。
 - 每一轮只要会改文件，都必须 **重新 `begin` 新建 sessionId**。
 - 旧 session 仅用于历史下拉查看，不得作为新一轮改动的默认容器。
 
 ### 必须流程（每一轮独立）
-1. **本回合首次改文件前**执行 begin，捕获**本回合编码前**基线：
+1. **本回合首次改文件前**执行 begin，捕获**本回合编码前**基线并开始监听：
    ```bash
    "$HOME/.codex/skills/codex-session-diff-viewer/scripts/session_diff.sh" begin \
      --workspace "<绝对工作区路径>" \
-     --files "相对路径1,相对路径2" \
      --title "<本回合任务一句话>"
    ```
 2. 正常编码（只改本回合需要的文件）。
-3. 若中途要改**本回合尚未 track** 的文件：先对本回合 session 执行 `track`，再修改。
-4. **本回合收尾**（最终回复前）执行 summarize + open（优先使用本回合 sessionId）：
+3. **本回合收尾**（最终回复前）执行 summarize + open（优先使用本回合 sessionId）：
    ```bash
    "$HOME/.codex/skills/codex-session-diff-viewer/scripts/session_diff.sh" summarize \
      --session <本回合sessionId|latest> \
@@ -153,15 +146,15 @@ http://127.0.0.1:3847
    "$HOME/.codex/skills/codex-session-diff-viewer/scripts/session_diff.sh" open \
      --session <本回合sessionId|latest>
    ```
-5. 在最终回复提供可点击地址，例如：
+4. 在最终回复提供可点击地址，例如：
    `[查看本回合代码变更](http://127.0.0.1:3847)`
-6. 文案必须写明：这是“**本回合**编码前 vs 改完后”的变更，不是 git HEAD/工作区 diff，也不是整条聊天的累计 diff。
+5. 文案必须写明：这是“**本回合**编码前 vs 改完后”的变更，不是 git HEAD/工作区 diff，也不是整条聊天的累计 diff。
 
 ### 禁止
 - 不要用 `git diff`、`git diff HEAD`、`git status` 结果充当“此次 Codex 变更”
 - 不要在未 begin 的情况下假装有会话级 diff
 - 不要把上一轮 session 的累计变更当作本回合 diff
-- 不要在新的用户请求中默认 `track --session latest` 延续旧 session
+- 不要在新的用户请求中默认沿用旧 session
 
 ### 说明
 - skill 详情见：`~/.codex/skills/codex-session-diff-viewer/SKILL.md`
@@ -172,8 +165,8 @@ http://127.0.0.1:3847
 ### 4.3 更短版（空间有限时）
 
 ```markdown
-改代码前必须 session_diff begin；收尾必须 summarize + open；
-最终回复给可点击本地地址；只展示本次会话变更，禁止用 git diff 代替。
+改代码前必须 session_diff begin --workspace；收尾必须 summarize + open；
+最终回复给可点击本地地址；只展示本次会话变更，禁止用 git diff 代替。不必预列 --files。
 ```
 
 ### 4.4 提示词写作要点
@@ -182,7 +175,7 @@ http://127.0.0.1:3847
 |------|--------|
 | 写清「强制」 | 避免模型偷懒直接给 git diff |
 | 写清 begin 时机 | 必须在**第一次改文件前** |
-| 写清 track | 防止中途新文件无基线 |
+| 写清不必 --files | 监听 + 扫描自动发现，避免漏 track |
 | 写清 summarize + open | 收尾自动出概括和网页 |
 | 写清文案约束 | 明确告诉用户“不是 git HEAD diff” |
 | 固定本地地址 | 方便点击复查，且可复用已开标签页 |
@@ -199,9 +192,9 @@ http://127.0.0.1:3847
 
 | 命令 | 作用 |
 |------|------|
-| `begin` | 编码前拍基线，创建 session |
-| `track` | 补充跟踪新文件（先 track 再改） |
-| `summarize` | 生成/写入改动概括 |
+| `begin` | 编码前快照工作区、启动监听、创建 session |
+| `track` | 可选：强制纳入未被监听/ignore 的文件 |
+| `summarize` | 按监听/扫描结果冻结 after 并生成概括 |
 | `open` | 启动本地 Diff 网页（默认自动刷新概括） |
 | `status` | 输出当前会话摘要 JSON |
 | `list` | 列出最近会话（时间/项目名/概括/文件数） |
@@ -212,13 +205,13 @@ http://127.0.0.1:3847
 ```bash
 scripts/session_diff.sh begin \
   --workspace "/abs/path/to/project" \
-  --files "a.js,b.ts,path/new.py" \
   --title "可选任务标题"
 ```
 
 - `--workspace`：工作区绝对路径（项目根）
-- `--files`：计划修改/新建的相对路径（逗号或空格分隔）
-- 已存在文件：复制当前内容为基线
+- 不必 `--files`：会快照可跟踪文件并监听随后变更
+- `--files` 可选，强制纳入被 ignore 的路径或尚未创建的文件
+- 已存在文件：复制当前内容为基线（APFS 上优先 clonefile）
 - 不存在文件：记为缺失，最终显示为「新增」
 - stdout 会输出 `sessionId`
 
@@ -228,7 +221,7 @@ scripts/session_diff.sh begin \
 scripts/session_diff.sh track --session latest --files "src/extra.js"
 ```
 
-中途发现还要改未跟踪文件时使用。**先 track，再修改。**
+监听模式下通常不必再调。仅当文件被 ignore、或必须在写入前强制占位时使用。
 
 ### summarize
 
@@ -314,7 +307,9 @@ scripts/session_diff.sh open --session latest --no-open   # 只启动服务，�
 ~/.codex/session-diffs/
 ├── latest.json
 └── <sessionId>/
-    ├── meta.json          # 工作区、文件列表、概括、统计、afterCapturedAt
+    ├── meta.json          # 工作区、文件列表、概括、统计、afterCapturedAt、watch
+    ├── inventory.json     # begin 时的工作区索引
+    ├── dirty.json         # 监听到的脏路径
     ├── baseline/**        # 编码前文件快照（版本 1）
     └── after/**           # 本回合改完后快照（版本 2）
 ```
@@ -332,9 +327,9 @@ scripts/session_diff.sh open --session latest --no-open   # 只启动服务，�
 常见原因：
 
 1. 改文件前没执行 `begin`
-2. `begin --files` 没包含实际改动的文件
-3. 中途新文件没 `track`
-4. 文件改完后又改回原样（无差异）
+2. 文件改完后又改回原样（无差异）
+3. 改动落在默认 ignore 里（如 `node_modules/`、`target/`、图片/压缩包）
+4. `--workspace` 指错了目录
 
 ### Q2：可以只用 git diff 吗？
 
@@ -371,7 +366,7 @@ scripts/session_diff.sh open --session <sessionId>
 
 旧实现右侧读的是工作区当前文件。现在 summarize/open（以及下一轮 begin）会冻结 `after/**`，历史会话不再跟随最新文件变化。升级前已经存在、且从未冻结过 after 的旧会话，仍可能回退到工作区当前；新产生的会话不会。
 
-如果磁盘上的 `after/**` 已经正确，但网页仍把后续回合的改动叠进旧会话，通常是 3847 上还挂着升级前的查看器进程。`open` 会识别缺少 `session-after-v1` 协议的旧服务并重启。
+如果磁盘上的 `after/**` 已经正确，但网页仍把后续回合的改动叠进旧会话，通常是 3847 上还挂着升级前的查看器进程。`open` 会识别缺少 `session-watch-v1` 协议的旧服务并重启。
 
 ---
 
@@ -401,15 +396,9 @@ codex-session-diff-viewer/
 # 编码前
 "$HOME/.codex/skills/codex-session-diff-viewer/scripts/session_diff.sh" begin \
   --workspace "/Users/you/javaProject/demo" \
-  --files "src/main/java/App.java,README.md"
+  --title "补充日期工具"
 
-# ... Codex 修改文件 ...
-
-# 中途还要改一个新文件
-"$HOME/.codex/skills/codex-session-diff-viewer/scripts/session_diff.sh" track \
-  --session latest \
-  --files "src/main/java/util/DateUtil.java"
-# 然后再写 DateUtil.java
+# ... Codex 修改/新建文件，不必 track ...
 
 # 收尾
 "$HOME/.codex/skills/codex-session-diff-viewer/scripts/session_diff.sh" summarize \

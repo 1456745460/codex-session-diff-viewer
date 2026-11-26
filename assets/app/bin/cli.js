@@ -23,11 +23,12 @@ function printHelp() {
 codex-session-diff
 
 命令:
-  begin --workspace <dir> --files f1,f2 [--title t]
-      在修改前捕获文件基线，返回 sessionId
+  begin --workspace <dir> [--title t] [--files f1,f2] [--no-watch]
+      编码前捕获工作区基线并启动文件监听；不必预列文件
+      --files 仅用于强制纳入（例如被 ignore 的路径或尚未创建的文件）
 
   track --session <id> --files f1,f2
-      补充跟踪新文件（若文件已存在则抓当前内容为基线；用于“刚创建前”应先 track 再写）
+      可选。监听会自动发现新文件；仅在需要强制纳入时使用
 
   open [--session latest|<id>] [--port 3847] [--no-open]
       启动/复用查看器；当前回合会先冻结「改完后」快照再刷新概括
@@ -35,7 +36,7 @@ codex-session-diff
       已运行服务缺少 after 快照协议或代码指纹不匹配时会重启，避免历史会话读工作区最新文件
 
   summarize [--session latest|<id>] [--summary "手动概括"] [--json]
-      冻结本回合「改完后」快照，并基于 baseline vs after 写入概括
+      根据监听/扫描结果冻结本回合「改完后」快照，并写入概括
 
   status [--session latest|<id>]
       输出会话摘要 JSON
@@ -64,6 +65,7 @@ function parseKv(argv) {
     else if (a === '--json') out.json = true;
     else if (a === '--summary') out.summary = argv[++i];
     else if (a === '--force') out.force = true;
+    else if (a === '--no-watch') out.noWatch = true;
     else if (a === '--help' || a === '-h') out.help = true;
     else out._.push(a);
   }
@@ -83,14 +85,11 @@ async function cmdBegin(args) {
   const files = parseFiles(args.files);
   // also accept positional files
   for (const p of args._) files.push(p);
-  if (!files.length) {
-    console.error('begin 需要 --files 列出即将修改/创建的文件（相对工作区）');
-    process.exit(2);
-  }
   const meta = await createSession({
     workspace,
     title: args.title || '',
     files,
+    watch: !args.noWatch,
   });
   if (args.json) {
     console.log(JSON.stringify(meta, null, 2));
@@ -98,7 +97,10 @@ async function cmdBegin(args) {
     console.log(meta.sessionId);
     console.error(`session created: ${meta.sessionId}`);
     console.error(`workspace: ${meta.workspaceRoot}`);
-    console.error(`tracked files: ${meta.files.length}`);
+    console.error(`baseline files: ${meta.watch?.snapshotted ?? 0}`);
+    if (meta.watch?.enabled) console.error(`watch pid: ${meta.watch.pid}`);
+    else if (meta.watch?.error) console.error(`watch failed: ${meta.watch.error}（收尾仍会扫描）`);
+    if (meta.files.length) console.error(`hint files: ${meta.files.length}`);
   }
 }
 
@@ -107,7 +109,7 @@ async function cmdTrack(args) {
   const files = parseFiles(args.files);
   for (const p of args._) files.push(p);
   if (!files.length) {
-    console.error('track 需要 --files');
+    console.error('track 需要 --files（监听模式下通常不必再 track）');
     process.exit(2);
   }
   const meta = await trackFiles(sessionId, files);

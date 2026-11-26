@@ -1,6 +1,6 @@
 ---
 name: codex-session-diff-viewer
-description: 按“一轮对话一个 session”捕获编码前基线并打开本地 Diff 网页，只展示本回合 Codex 改动（编码前 vs 改完后），不是 git HEAD/工作区 diff，也不是整条聊天累计 diff。用于每轮编码任务收尾、代码变更复查、打开变更链接、自动打开浏览器查看 session diff。
+description: 按“一轮对话一个 session”捕获编码前基线、监听工作区变更并打开本地 Diff 网页，只展示本回合改动（编码前 vs 改完后），不是 git HEAD/工作区 diff，也不是整条聊天累计 diff。用于每轮编码任务收尾、代码变更复查、打开变更链接、自动打开浏览器查看 session diff。
 ---
 
 # Codex Session Diff Viewer
@@ -12,7 +12,7 @@ description: 按“一轮对话一个 session”捕获编码前基线并打开�
 - **一轮对话 / 本回合** = 用户的一次请求 + 为完成该请求所做的编码，直到本轮最终回复
 - 每一轮只要会改文件，都必须 **重新 `begin`**，生成**新的** `sessionId`
 - **禁止**把整条聊天从头到尾复用同一个 session
-- **禁止**在新一轮里默认 `track --session latest` 挂到上一轮 session
+- **不必预列 `--files`，也不必中途 `track`**：`begin` 会快照工作区并监听变更，收尾按监听结果 + 扫描发现本回合改过的文件
 - `latest` 仅表示“最近一次 begin 的 session”，只应在**同一回合内**使用
 - 跨多轮累计对比仅当用户明确要求时才可做，且需单独说明
 
@@ -37,28 +37,21 @@ description: 按“一轮对话一个 session”捕获编码前基线并打开�
 ```bash
 scripts/session_diff.sh begin \
   --workspace "<repo_or_workspace_abs_path>" \
-  --files "path/a.js,path/b.ts,path/new-file.py" \
   --title "本回合任务标题"
 ```
 
+- `--workspace`：项目根目录，不要用 `$HOME`
 - `--title`：建议写本回合任务一句话，便于会话下拉区分各轮
-- `--files`：本回合计划修改或新建的相对路径（逗号/空格分隔）
-- 已存在文件：复制当前内容作为“本回合编码前”
-- 尚不存在文件：基线记为缺失，最终会显示为“新增”
+- 不必传 `--files`。begin 会：
+  1. 把工作区可跟踪文件快照为「本回合编码前」
+  2. 启动文件监听，记录随后的创建/修改/删除
+- `--files` 可选，只用于强制纳入被 ignore 的路径，或尚未创建、希望先占位的文件
 - 若上一轮还没有 after 快照，会顺手用当时工作区把它冻成「上一轮改完后」
 - 命令 stdout 输出**新的** `sessionId`（保存备用；本回合收尾优先用它）
 
 > 注意：即使同一聊天线程里上一轮已经 begin 过，本回合也要重新 begin。
 
-### 2) 本回合中途发现新文件
-
-仅针对**本回合 session** track 后再改：
-
-```bash
-scripts/session_diff.sh track --session <本回合sessionId|latest> --files "path/extra.js"
-```
-
-### 3) 本回合编码完成后：生成概括并打开本回合变更
+### 2) 本回合编码完成后：生成概括并打开本回合变更
 
 ```bash
 scripts/session_diff.sh summarize --session <本回合sessionId|latest>
@@ -68,7 +61,7 @@ scripts/session_diff.sh summarize --session <本回合sessionId|latest> --summar
 scripts/session_diff.sh open --session <本回合sessionId|latest>
 ```
 
-- `summarize` / `open` 会把工作区当前内容冻成该 session 的 **after 快照**（本回合改完后）
+- `summarize` / `open` 会合并监听脏路径与工作区扫描，把当前内容冻成该 session 的 **after 快照**
 - 之后查看该会话（含切换历史下拉）始终对比 **baseline vs after**，不会再读工作区最新文件
 - 同一回合对 latest 再次 summarize/open 会刷新 after；一旦开始了新 session，上一轮 after 冻结不再覆盖
 - `open` 会先基于**本回合** session diff 生成智能改动概括并写入 `meta.json`
@@ -81,6 +74,8 @@ scripts/session_diff.sh open --session <本回合sessionId|latest>
 - 页面左右分别为 **本回合编码前 / 本回合改完后**
 - 会话下拉展示：`时间 · 项目名 · 改动概括 · N 个文件`（每个下拉项对应历史某一轮）
 
+`track` 仍可用，但监听模式下通常不必再调。
+
 仅查看状态：
 
 ```bash
@@ -91,12 +86,11 @@ scripts/session_diff.sh status --session <本回合sessionId|latest>
 
 只要本回合会改代码文件，必须：
 
-1. **本回合改文件前重新 `begin`**（不要复用上一轮 session）
+1. **本回合改文件前重新 `begin --workspace`**（不要复用上一轮 session，不必预列文件）
 2. 本回合编码、验证
-3. 若新增未跟踪文件：对本回合 session `track` 后再改
-4. **本回合收尾**执行 `summarize` + `open`（优先本回合 sessionId）
-5. 在最终回复中给出可点击链接：`[查看本回合代码变更](http://127.0.0.1:3847)`（端口固定，不因多次 open 递增）
-6. 明确说明：这是**本回合**变更，不是 git 仓库 diff，也不是整条聊天累计 diff
+3. **本回合收尾**执行 `summarize` + `open`（优先本回合 sessionId）
+4. 在最终回复中给出可点击链接：`[查看本回合代码变更](http://127.0.0.1:3847)`（端口固定，不因多次 open 递增）
+5. 明确说明：这是**本回合**变更，不是 git 仓库 diff，也不是整条聊天累计 diff
 
 若本回合未执行 begin 就已改文件：
 
@@ -109,7 +103,7 @@ scripts/session_diff.sh status --session <本回合sessionId|latest>
 
 ```text
 用户第1轮：做功能A → begin session-1 → 改代码 → open session-1
-用户第2轮：修 bug → track session-1 → 继续改 → open session-1   ❌ 累计混进两轮
+用户第2轮：修 bug → 继续用 session-1 → open session-1   ❌ 累计混进两轮
 ```
 
 正确：

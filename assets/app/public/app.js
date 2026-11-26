@@ -741,6 +741,7 @@
     try {
       const es = new EventSource('/api/events');
       state.liveSource = es;
+      let filesChangedTimer = 0;
       es.addEventListener('hello', () => {
         // connected
       });
@@ -760,6 +761,24 @@
             return;
           }
           focusSession(data.sessionId).catch((e) => setError(e.message));
+        } catch (e) {
+          setError(e.message || String(e));
+        }
+      });
+      es.addEventListener('files-changed', (ev) => {
+        try {
+          const data = JSON.parse(ev.data || '{}');
+          if (!data.sessionId || data.sessionId !== state.sessionId) return;
+          clearTimeout(filesChangedTimer);
+          filesChangedTimer = setTimeout(() => {
+            loadSessions(data.sessionId)
+              .then(() => loadSummary())
+              .then(async () => {
+                if (state.selectedPath) await selectFile(state.selectedPath, true);
+                else if (state.files.length) await selectFile(state.files[0].path, true);
+              })
+              .catch((e) => setError(e.message));
+          }, 280);
         } catch (e) {
           setError(e.message || String(e));
         }

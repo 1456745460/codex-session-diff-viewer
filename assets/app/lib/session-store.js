@@ -3,6 +3,8 @@ const fsp = require('fs/promises');
 const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
+const { snapshotWorkspaceBaseline, writeInventory, discoverChangedPaths, makeWorkspaceIgnore } = require('./workspace-scan');
+const { spawnWatchDaemon, stopWatchDaemon, readDirty } = require('./workspace-watch');
 
 const HOME = process.env.CODEX_HOME || path.join(os.homedir(), '.codex');
 const SESSIONS_ROOT = path.join(HOME, 'session-diffs');
@@ -78,7 +80,8 @@ async function isDirectory(p) {
 
 async function copyFilePreserve(src, dest) {
   ensureDirSync(path.dirname(dest));
-  await fsp.copyFile(src, dest);
+  const flags = fs.constants.COPYFILE_FICLONE || 0;
+  await fsp.copyFile(src, dest, flags);
 }
 
 async function readTextMaybe(filePath) {
@@ -122,7 +125,43 @@ function resolveUnderRoot(root, relPath) {
   return abs;
 }
 
-async function createSession({ workspace, title = '', files = [], note = '' }) {
+function sessionsRootIgnorePrefix(workspaceRoot) {
+  const extra = [];
+  const ws = path.resolve(workspaceRoot);
+  const sessions = path.resolve(SESSIONS_ROOT);
+  if (sessions === ws || sessions.startsWith(ws + path.sep)) {
+    extra.push(path.relative(ws, sessions).replace(/\\/g, '/'));
+  }
+  const home = path.resolve(os.homedir());
+  if (ws === home) {
+    extra.push(
+      'Library',
+      'Pictures',
+      'Movies',
+      'Music',
+      'Downloads',
+      'Desktop',
+      'Applications',
+      'Public',
+      '.Trash',
+      '.npm',
+      '.local',
+    );
+  }
+  return extra;
+}
+
+async function baselineMarkerExists(sessionId, rel) {
+  const baseFile = path.join(baselineDir(sessionId), rel);
+  const binMeta = path.join(baselineDir(sessionId), `${rel}.__binary_meta.json`);
+  return (await pathExists(baseFile)) || (await pathExists(binMeta));
+}
+
+async function baselineIsBinary(sessionId, rel) {
+  return pathExists(path.join(baselineDir(sessionId), `${rel}.__binary_meta.json`));
+}
+
+async function createSession({ workspace, title = '', files = [], note = '', watch = true }) {
   const workspaceRoot = path.resolve(workspace || process.cwd());
   if (!(await isDirectory(workspaceRoot))) {
     const err = new Error(`工作区不存在: ${workspaceRoot}`);
@@ -131,9 +170,25 @@ async function createSession({ workspace, title = '', files = [], note = '' }) {
   }
 
   const previousSessionId = await getLatestSessionId();
+  if (previousSessionId) {
+    try {
+      await stopWatchDaemon(sessionDir(previousSessionId));
+    } catch {
+      // 停旧监听失败不阻断新 session
+    }
+  }
+
   const sessionId = nowId();
-  const dir = sessionDir(sessionId);
   ensureDirSync(baselineDir(sessionId));
+
+  const extraPrefixes = sessionsRootIgnorePrefix(workspaceRoot);
+  const ignore = await makeWorkspaceIgnore(workspaceRoot, extraPrefixes);
+  const inventory = await snapshotWorkspaceBaseline(
+    workspaceRoot,
+    baselineDir(sessionId),
+    ignore.shouldIgnore,
+  );
+  await writeInventory(sessionDir(sessionId), inventory);
 
   const uniqueFiles = [];
   const seen = new Set();
@@ -148,8 +203,8 @@ async function createSession({ workspace, title = '', files = [], note = '' }) {
   for (const rel of uniqueFiles) {
     const abs = resolveUnderRoot(workspaceRoot, rel);
     const exists = await pathExists(abs);
-    let binary = false;
-    if (exists) {
+    let binary = await baselineIsBinary(sessionId, rel);
+    if (exists && !(await baselineMarkerExists(sessionId, rel))) {
       const st = await fsp.stat(abs);
       if (st.isDirectory()) continue;
       const sample = await fsp.readFile(abs).catch(() => null);
@@ -157,7 +212,6 @@ async function createSession({ workspace, title = '', files = [], note = '' }) {
       if (!binary) {
         await copyFilePreserve(abs, path.join(baselineDir(sessionId), rel));
       } else {
-        // still mark baseline existence for binary
         await writeJson(path.join(baselineDir(sessionId), `${rel}.__binary_meta.json`), {
           binary: true,
           size: st.size,
@@ -167,8 +221,9 @@ async function createSession({ workspace, title = '', files = [], note = '' }) {
     }
     tracked.push({
       path: rel,
-      baselineExists: exists,
+      baselineExists: exists || await baselineMarkerExists(sessionId, rel),
       binary,
+      source: 'explicit',
     });
   }
 
@@ -190,11 +245,17 @@ async function createSession({ workspace, title = '', files = [], note = '' }) {
     stats: { added: 0, modified: 0, deleted: 0, additions: 0, deletions: 0 },
     summarySource: '',
     summaryUpdatedAt: null,
+    watch: {
+      enabled: false,
+      pid: null,
+      snapshotted: inventory.snapshotted,
+      skipped: inventory.skipped,
+      fileCount: inventory.fileCount,
+    },
   };
   await writeJson(metaPath(sessionId), meta);
   if (previousSessionId && previousSessionId !== sessionId) {
     try {
-      // 此时上一轮仍是 latest，把当时工作区冻成它的「改完后」快照
       await captureAfterSnapshot(previousSessionId, { refresh: false });
     } catch {
       // 冻结上一轮失败不应阻断新 session
@@ -205,6 +266,26 @@ async function createSession({ workspace, title = '', files = [], note = '' }) {
     workspaceRoot,
     createdAt: meta.createdAt,
   });
+
+  if (watch !== false) {
+    try {
+      const pid = spawnWatchDaemon(sessionId);
+      meta.watch = {
+        ...meta.watch,
+        enabled: true,
+        pid,
+      };
+      meta.updatedAt = new Date().toISOString();
+      await writeJson(metaPath(sessionId), meta);
+    } catch (error) {
+      meta.watch = {
+        ...meta.watch,
+        enabled: false,
+        error: error.message,
+      };
+      await writeJson(metaPath(sessionId), meta);
+    }
+  }
   return meta;
 }
 
@@ -244,8 +325,9 @@ async function trackFiles(sessionId, files = []) {
     if (existing.has(rel)) continue;
     const abs = resolveUnderRoot(meta.workspaceRoot, rel);
     const exists = await pathExists(abs);
-    let binary = false;
-    if (exists) {
+    const alreadyBaseline = await baselineMarkerExists(sessionId, rel);
+    let binary = alreadyBaseline ? await baselineIsBinary(sessionId, rel) : false;
+    if (exists && !alreadyBaseline) {
       const st = await fsp.stat(abs);
       if (st.isDirectory()) continue;
       const sample = await fsp.readFile(abs).catch(() => null);
@@ -260,12 +342,54 @@ async function trackFiles(sessionId, files = []) {
         });
       }
     }
-    const item = { path: rel, baselineExists: exists, binary };
+    const item = {
+      path: rel,
+      baselineExists: alreadyBaseline || exists,
+      binary,
+      source: 'explicit',
+    };
     existing.set(rel, item);
     meta.files.push(item);
   }
   meta.updatedAt = new Date().toISOString();
   await writeJson(metaPath(sessionId), meta);
+  return meta;
+}
+
+async function syncDiscoveredFiles(sessionId) {
+  const meta = await loadSession(sessionId);
+  const extraPrefixes = sessionsRootIgnorePrefix(meta.workspaceRoot);
+  const dirty = await readDirty(sessionDir(sessionId));
+  const discovered = await discoverChangedPaths({
+    workspaceRoot: meta.workspaceRoot,
+    sessionDir: sessionDir(sessionId),
+    extraPaths: (meta.files || []).map((f) => f.path),
+    dirtyPaths: dirty.paths,
+    extraPrefixes,
+  });
+  const existing = new Map((meta.files || []).map((f) => [f.path, f]));
+  let changed = false;
+  for (const rel of discovered) {
+    if (existing.has(rel)) continue;
+    const baselineExists = await baselineMarkerExists(sessionId, rel);
+    const item = {
+      path: rel,
+      baselineExists,
+      binary: await baselineIsBinary(sessionId, rel),
+      source: 'watch',
+    };
+    existing.set(rel, item);
+    meta.files.push(item);
+    changed = true;
+  }
+  if (changed) {
+    meta.updatedAt = new Date().toISOString();
+    meta.watch = {
+      ...(meta.watch || {}),
+      dirtyCount: dirty.paths.length,
+    };
+    await writeJson(metaPath(sessionId), meta);
+  }
   return meta;
 }
 
@@ -313,6 +437,7 @@ async function snapshotWorkspaceFile(workspaceRoot, snapshotRoot, rel) {
 }
 
 async function captureAfterSnapshot(sessionId, options = {}) {
+  await syncDiscoveredFiles(sessionId);
   const meta = await loadSession(sessionId);
   const latestId = await getLatestSessionId();
   const isLatest = latestId === sessionId;
@@ -464,6 +589,7 @@ module.exports = {
   listSessions,
   getLatestSessionId,
   trackFiles,
+  syncDiscoveredFiles,
   captureCurrentTree,
   captureAfterSnapshot,
   readBaselineText,
@@ -476,6 +602,7 @@ module.exports = {
   normalizeRel,
   deriveProjectName,
   resolveUnderRoot,
+  sessionsRootIgnorePrefix,
   sessionDir,
   metaPath,
   baselineDir,

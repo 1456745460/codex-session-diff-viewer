@@ -4,8 +4,10 @@ const { execSync } = require('child_process');
 const express = require('express');
 const open = require('open');
 const { getSessionSummary, getSessionFileDiff, resolveSessionId, listSessionCards, finalizeSessionInsights } = require('./lib/session-diff');
-const { loadSession, revertFiles, revertFile } = require('./lib/session-store');
+const { loadSession, revertFiles, revertFile, sessionDir, sessionsRootIgnorePrefix, syncDiscoveredFiles, getLatestSessionId } = require('./lib/session-store');
 const { getViewerIdentity } = require('./lib/viewer-identity');
+const { watchWorkspace, addDirtyPaths } = require('./lib/workspace-watch');
+const { makeWorkspaceIgnore } = require('./lib/workspace-scan');
 
 function parseArgs(argv) {
   const args = {
@@ -123,6 +125,8 @@ async function createApp(defaultSessionId) {
   const identity = getViewerIdentity(__dirname);
   /** @type {Set<import('http').ServerResponse>} */
   const sseClients = new Set();
+  let liveWatcher = null;
+  let liveWatchSessionId = null;
 
   function sseSend(res, event, data) {
     res.write(`event: ${event}\n`);
@@ -144,6 +148,38 @@ async function createApp(defaultSessionId) {
     return sseClients.size;
   }
 
+  async function attachLiveWatch(sessionId) {
+    if (!sessionId || liveWatchSessionId === sessionId) return;
+    if (liveWatcher) {
+      liveWatcher.close();
+      liveWatcher = null;
+      liveWatchSessionId = null;
+    }
+    try {
+      const latestId = await getLatestSessionId();
+      if (latestId && sessionId !== latestId) return;
+      const meta = await loadSession(sessionId);
+      const extra = sessionsRootIgnorePrefix(meta.workspaceRoot);
+      const ignore = await makeWorkspaceIgnore(meta.workspaceRoot, extra);
+      const dir = sessionDir(sessionId);
+      liveWatcher = watchWorkspace(meta.workspaceRoot, {
+        shouldIgnore: ignore.shouldIgnore,
+        onBatch: async (paths) => {
+          await addDirtyPaths(dir, sessionId, paths);
+          try {
+            await syncDiscoveredFiles(sessionId);
+          } catch {
+            // 发现失败时仍通知前端刷新
+          }
+          broadcast('files-changed', { sessionId, paths, at: Date.now() });
+        },
+      });
+      liveWatchSessionId = sessionId;
+    } catch {
+      liveWatcher = null;
+      liveWatchSessionId = null;
+    }
+  }
   async function pickSessionId(req) {
     const q = req.query.session || req.body?.session || activeDefaultSessionId || defaultSessionId || 'latest';
     return resolveSessionId(q);
@@ -220,6 +256,7 @@ async function createApp(defaultSessionId) {
       const raw = req.body?.session || req.body?.sessionId || activeDefaultSessionId || 'latest';
       const sessionId = await resolveSessionId(raw);
       activeDefaultSessionId = sessionId;
+      await attachLiveWatch(sessionId);
       const clients = broadcast('focus', {
         sessionId,
         reason: req.body?.reason || 'open',
@@ -330,6 +367,10 @@ async function createApp(defaultSessionId) {
   app.get('*', (_req, res) => {
     res.sendFile(path.join(publicDir, 'index.html'));
   });
+
+  if (activeDefaultSessionId) {
+    attachLiveWatch(activeDefaultSessionId).catch(() => {});
+  }
 
   return app;
 }

@@ -3,14 +3,18 @@ const path = require('path');
 const crypto = require('crypto');
 
 /** Bump when snapshot comparison semantics change. */
-const VIEWER_PROTOCOL = 'session-after-v1';
+const VIEWER_PROTOCOL = 'session-watch-v1';
 
 const FINGERPRINT_FILES = [
   'server.js',
   'bin/cli.js',
+  'bin/watch-daemon.js',
   'lib/session-diff.js',
   'lib/session-store.js',
   'lib/viewer-identity.js',
+  'lib/ignore-files.js',
+  'lib/workspace-scan.js',
+  'lib/workspace-watch.js',
   'public/app.js',
 ];
 
