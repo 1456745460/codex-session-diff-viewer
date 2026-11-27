@@ -4,10 +4,9 @@ const { execSync } = require('child_process');
 const express = require('express');
 const open = require('open');
 const { getSessionSummary, getSessionFileDiff, resolveSessionId, listSessionCards, finalizeSessionInsights } = require('./lib/session-diff');
-const { loadSession, revertFiles, revertFile, sessionDir, sessionsRootIgnorePrefix, syncDiscoveredFiles, getLatestSessionId } = require('./lib/session-store');
+const { loadSession, revertFiles, revertFile, sessionDir, buildWatchTargets, syncDiscoveredFiles, getLatestSessionId, getSessionsRoot } = require('./lib/session-store');
 const { getViewerIdentity } = require('./lib/viewer-identity');
-const { watchWorkspace, addDirtyPaths } = require('./lib/workspace-watch');
-const { makeWorkspaceIgnore } = require('./lib/workspace-scan');
+const { watchWorkspaceTargets, addDirtyPaths } = require('./lib/workspace-watch');
 
 function parseArgs(argv) {
   const args = {
@@ -159,11 +158,9 @@ async function createApp(defaultSessionId) {
       const latestId = await getLatestSessionId();
       if (latestId && sessionId !== latestId) return;
       const meta = await loadSession(sessionId);
-      const extra = sessionsRootIgnorePrefix(meta.workspaceRoot);
-      const ignore = await makeWorkspaceIgnore(meta.workspaceRoot, extra);
       const dir = sessionDir(sessionId);
-      liveWatcher = watchWorkspace(meta.workspaceRoot, {
-        shouldIgnore: ignore.shouldIgnore,
+      const targets = await buildWatchTargets(meta);
+      liveWatcher = await watchWorkspaceTargets(targets, {
         onBatch: async (paths) => {
           await addDirtyPaths(dir, sessionId, paths);
           try {
@@ -287,7 +284,7 @@ async function createApp(defaultSessionId) {
       res.json({
         sessions,
         current,
-        sessionsRoot: require('./lib/session-store').SESSIONS_ROOT,
+        sessionsRoot: getSessionsRoot(),
       });
     } catch (error) {
       res.status(400).json({ error: error.message, code: error.code || 'ERROR' });

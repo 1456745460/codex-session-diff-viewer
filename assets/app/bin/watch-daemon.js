@@ -1,8 +1,6 @@
 #!/usr/bin/env node
-const path = require('path');
-const { loadSession, sessionDir, sessionsRootIgnorePrefix } = require('../lib/session-store');
+const { loadSession, sessionDir, buildWatchTargets } = require('../lib/session-store');
 const { runWatchLoop } = require('../lib/workspace-watch');
-const { makeWorkspaceIgnore } = require('../lib/workspace-scan');
 
 async function main() {
   const sessionId = process.argv[2];
@@ -12,14 +10,13 @@ async function main() {
   }
   const meta = await loadSession(sessionId);
   const dir = sessionDir(sessionId);
-  const extra = sessionsRootIgnorePrefix(meta.workspaceRoot);
-  const ignore = await makeWorkspaceIgnore(meta.workspaceRoot, extra);
+  const targets = await buildWatchTargets(meta);
   process.title = `codex-session-watch:${sessionId}`;
   await runWatchLoop({
     sessionId,
     sessionDir: dir,
     workspaceRoot: meta.workspaceRoot,
-    shouldIgnore: ignore.shouldIgnore,
+    targets,
   });
 }
 

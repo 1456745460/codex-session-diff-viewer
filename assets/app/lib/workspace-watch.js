@@ -226,12 +226,47 @@ async function watchWorkspace(workspaceRoot, { shouldIgnore, onBatch, debounceMs
   };
 }
 
-async function runWatchLoop({ sessionId, sessionDir, workspaceRoot, shouldIgnore }) {
+async function watchWorkspaceTargets(targets, { onBatch, debounceMs = 180 } = {}) {
+  const list = Array.isArray(targets) ? targets : [];
+  const closers = [];
+  for (const t of list) {
+    const prefix = toPosix(t.pathPrefix || '');
+    const watcher = await watchWorkspace(t.root, {
+      shouldIgnore: t.shouldIgnore,
+      debounceMs,
+      onBatch: (paths) => {
+        const mapped = !prefix || prefix === '.'
+          ? paths
+          : paths.map((p) => `${prefix}/${toPosix(p)}`);
+        return onBatch(mapped);
+      },
+    });
+    closers.push(watcher);
+  }
+  return {
+    close() {
+      for (const watcher of closers) {
+        try {
+          watcher.close();
+        } catch {
+          // already closed
+        }
+      }
+      closers.length = 0;
+    },
+  };
+}
+
+async function runWatchLoop({ sessionId, sessionDir, workspaceRoot, shouldIgnore, targets }) {
   await writePid(sessionDir, process.pid);
-  const watcher = await watchWorkspace(workspaceRoot, {
-    shouldIgnore,
-    onBatch: (paths) => addDirtyPaths(sessionDir, sessionId, paths),
-  });
+  const watcher = targets && targets.length
+    ? await watchWorkspaceTargets(targets, {
+      onBatch: (paths) => addDirtyPaths(sessionDir, sessionId, paths),
+    })
+    : await watchWorkspace(workspaceRoot, {
+      shouldIgnore,
+      onBatch: (paths) => addDirtyPaths(sessionDir, sessionId, paths),
+    });
 
   const shutdown = async () => {
     watcher.close();
@@ -296,6 +331,7 @@ module.exports = {
   readDirty,
   addDirtyPaths,
   watchWorkspace,
+  watchWorkspaceTargets,
   runWatchLoop,
   spawnWatchDaemon,
   stopWatchDaemon,

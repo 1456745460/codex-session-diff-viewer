@@ -3,11 +3,19 @@ const fsp = require('fs/promises');
 const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
-const { snapshotWorkspaceBaseline, writeInventory, discoverChangedPaths, makeWorkspaceIgnore } = require('./workspace-scan');
+const { snapshotWorkspaceRoots, writeInventory, discoverChangedPaths, makeWorkspaceIgnore } = require('./workspace-scan');
 const { spawnWatchDaemon, stopWatchDaemon, readDirty } = require('./workspace-watch');
+const {
+  resolveWorkspaceRoots,
+  lowestCommonAncestor,
+  pathPrefix,
+} = require('./workspace-scope');
+const { toPosix } = require('./ignore-files');
 
-const HOME = process.env.CODEX_HOME || path.join(os.homedir(), '.codex');
-const SESSIONS_ROOT = path.join(HOME, 'session-diffs');
+function getSessionsRoot() {
+  const home = process.env.CODEX_HOME || path.join(os.homedir(), '.codex');
+  return path.join(home, 'session-diffs');
+}
 
 function ensureDirSync(dir) {
   fs.mkdirSync(dir, { recursive: true });
@@ -22,7 +30,7 @@ function nowId() {
 }
 
 function sessionDir(sessionId) {
-  return path.join(SESSIONS_ROOT, sessionId);
+  return path.join(getSessionsRoot(), sessionId);
 }
 
 function metaPath(sessionId) {
@@ -97,21 +105,24 @@ async function readTextMaybe(filePath) {
 }
 
 
-function deriveProjectName(workspaceRoot) {
+function deriveProjectName(workspaceRoot, workspaceRoots) {
   if (!workspaceRoot) return 'project';
   const abs = path.resolve(String(workspaceRoot)).replace(/\\/g, '/');
   const home = path.resolve(os.homedir()).replace(/\\/g, '/');
+  let base;
   if (abs === home) {
-    return '/';
-  }
-  // 去掉用户主目录前缀，保留路径形态：/javaProject/traceback/backend
-  if (abs.startsWith(`${home}/`)) {
+    base = '/';
+  } else if (abs.startsWith(`${home}/`)) {
     const rest = abs.slice(home.length);
-    return rest.startsWith('/') ? rest : `/${rest}`;
+    base = rest.startsWith('/') ? rest : `/${rest}`;
+  } else {
+    const cleaned = abs.replace(/^[A-Za-z]:/, '');
+    base = cleaned.startsWith('/') ? cleaned : `/${cleaned}`;
   }
-  // 非家目录：统一成以 / 开头的路径展示
-  const cleaned = abs.replace(/^[A-Za-z]:/, '');
-  return cleaned.startsWith('/') ? cleaned : `/${cleaned}`;
+  const roots = Array.isArray(workspaceRoots) ? workspaceRoots.map((r) => path.resolve(r)) : [];
+  if (roots.length <= 1) return base;
+  const names = roots.map((r) => path.basename(r)).join(',');
+  return `${base}/{${names}}`;
 }
 
 function resolveUnderRoot(root, relPath) {
@@ -128,7 +139,7 @@ function resolveUnderRoot(root, relPath) {
 function sessionsRootIgnorePrefix(workspaceRoot) {
   const extra = [];
   const ws = path.resolve(workspaceRoot);
-  const sessions = path.resolve(SESSIONS_ROOT);
+  const sessions = path.resolve(getSessionsRoot());
   if (sessions === ws || sessions.startsWith(ws + path.sep)) {
     extra.push(path.relative(ws, sessions).replace(/\\/g, '/'));
   }
@@ -161,13 +172,9 @@ async function baselineIsBinary(sessionId, rel) {
   return pathExists(path.join(baselineDir(sessionId), `${rel}.__binary_meta.json`));
 }
 
-async function createSession({ workspace, title = '', files = [], note = '', watch = true }) {
-  const workspaceRoot = path.resolve(workspace || process.cwd());
-  if (!(await isDirectory(workspaceRoot))) {
-    const err = new Error(`工作区不存在: ${workspaceRoot}`);
-    err.code = 'WORKSPACE_MISSING';
-    throw err;
-  }
+async function createSession({ workspace, workspaces, title = '', files = [], note = '', watch = true }) {
+  const workspaceRoots = await resolveWorkspaceRoots({ workspace, workspaces });
+  const workspaceRoot = lowestCommonAncestor(workspaceRoots);
 
   const previousSessionId = await getLatestSessionId();
   if (previousSessionId) {
@@ -181,13 +188,12 @@ async function createSession({ workspace, title = '', files = [], note = '', wat
   const sessionId = nowId();
   ensureDirSync(baselineDir(sessionId));
 
-  const extraPrefixes = sessionsRootIgnorePrefix(workspaceRoot);
-  const ignore = await makeWorkspaceIgnore(workspaceRoot, extraPrefixes);
-  const inventory = await snapshotWorkspaceBaseline(
-    workspaceRoot,
-    baselineDir(sessionId),
-    ignore.shouldIgnore,
-  );
+  const inventory = await snapshotWorkspaceRoots({
+    pathRoot: workspaceRoot,
+    workspaceRoots,
+    baselineRoot: baselineDir(sessionId),
+    extraPrefixForRoot: sessionsRootIgnorePrefix,
+  });
   await writeInventory(sessionDir(sessionId), inventory);
 
   const uniqueFiles = [];
@@ -227,12 +233,13 @@ async function createSession({ workspace, title = '', files = [], note = '', wat
     });
   }
 
-  const projectName = deriveProjectName(workspaceRoot);
+  const projectName = deriveProjectName(workspaceRoot, workspaceRoots);
   const meta = {
     sessionId,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     workspaceRoot,
+    workspaceRoots,
     projectName,
     title: title || projectName,
     note,
@@ -261,9 +268,10 @@ async function createSession({ workspace, title = '', files = [], note = '', wat
       // 冻结上一轮失败不应阻断新 session
     }
   }
-  await writeJson(path.join(SESSIONS_ROOT, 'latest.json'), {
+  await writeJson(path.join(getSessionsRoot(), 'latest.json'), {
     sessionId,
     workspaceRoot,
+    workspaceRoots,
     createdAt: meta.createdAt,
   });
 
@@ -300,8 +308,9 @@ async function loadSession(sessionId) {
 }
 
 async function listSessions(limit = 20) {
-  ensureDirSync(SESSIONS_ROOT);
-  const names = await fsp.readdir(SESSIONS_ROOT);
+  const root = getSessionsRoot();
+  ensureDirSync(root);
+  const names = await fsp.readdir(root);
   const items = [];
   for (const name of names) {
     if (name === 'latest.json') continue;
@@ -313,7 +322,7 @@ async function listSessions(limit = 20) {
 }
 
 async function getLatestSessionId() {
-  const latest = await readJson(path.join(SESSIONS_ROOT, 'latest.json'));
+  const latest = await readJson(path.join(getSessionsRoot(), 'latest.json'));
   return latest?.sessionId || null;
 }
 
@@ -356,16 +365,34 @@ async function trackFiles(sessionId, files = []) {
   return meta;
 }
 
+async function buildWatchTargets(meta) {
+  const pathRoot = path.resolve(meta.workspaceRoot);
+  const roots = (Array.isArray(meta.workspaceRoots) && meta.workspaceRoots.length)
+    ? meta.workspaceRoots.map((r) => path.resolve(r))
+    : [pathRoot];
+  const targets = [];
+  for (const root of roots) {
+    const extra = sessionsRootIgnorePrefix(root);
+    const ignore = await makeWorkspaceIgnore(root, extra);
+    targets.push({
+      root,
+      shouldIgnore: ignore.shouldIgnore,
+      pathPrefix: pathPrefix(pathRoot, root),
+    });
+  }
+  return targets;
+}
+
 async function syncDiscoveredFiles(sessionId) {
   const meta = await loadSession(sessionId);
-  const extraPrefixes = sessionsRootIgnorePrefix(meta.workspaceRoot);
   const dirty = await readDirty(sessionDir(sessionId));
   const discovered = await discoverChangedPaths({
     workspaceRoot: meta.workspaceRoot,
+    workspaceRoots: meta.workspaceRoots,
     sessionDir: sessionDir(sessionId),
     extraPaths: (meta.files || []).map((f) => f.path),
     dirtyPaths: dirty.paths,
-    extraPrefixes,
+    extraPrefixForRoot: sessionsRootIgnorePrefix,
   });
   const existing = new Map((meta.files || []).map((f) => [f.path, f]));
   let changed = false;
@@ -459,9 +486,11 @@ async function captureAfterSnapshot(sessionId, options = {}) {
   }
   ensureDirSync(root);
 
+  const tracked = (meta.files || []).map((f) => f.path);
   for (const f of meta.files || []) {
     await snapshotWorkspaceFile(meta.workspaceRoot, root, f.path);
   }
+  await pruneBaselineToTracked(sessionId, tracked);
 
   const next = await updateSessionMeta(sessionId, {
     afterCapturedAt: new Date().toISOString(),
@@ -576,14 +605,80 @@ async function updateSessionMeta(sessionId, patch = {}) {
     updatedAt: new Date().toISOString(),
   };
   if (!next.projectName || patch.workspaceRoot) {
-    next.projectName = deriveProjectName(next.workspaceRoot) || next.title || 'project';
+    next.projectName = deriveProjectName(next.workspaceRoot, next.workspaceRoots) || next.title || 'project';
   }
   await writeJson(metaPath(sessionId), next);
   return next;
 }
 
+async function listFilesRecursive(root) {
+  const out = [];
+  async function walk(rel) {
+    const abs = rel ? path.join(root, rel) : root;
+    let entries;
+    try {
+      entries = await fsp.readdir(abs, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const ent of entries) {
+      const child = rel ? `${rel}/${ent.name}` : ent.name;
+      if (ent.isDirectory()) await walk(child);
+      else if (ent.isFile()) out.push(toPosix(child));
+    }
+  }
+  await walk('');
+  return out;
+}
+
+function trackedRelFromBaselineName(rel) {
+  const posix = toPosix(rel);
+  if (posix.endsWith('.__binary_meta.json')) {
+    return posix.slice(0, -'.__binary_meta.json'.length);
+  }
+  return posix;
+}
+
+async function pruneBaselineToTracked(sessionId, keepRels) {
+  const keep = new Set((keepRels || []).map(toPosix).filter(Boolean));
+  const root = baselineDir(sessionId);
+  const files = await listFilesRecursive(root);
+  for (const rel of files) {
+    if (keep.has(trackedRelFromBaselineName(rel))) continue;
+    try {
+      await fsp.unlink(path.join(root, rel));
+    } catch {
+      // 剪枝失败不阻断收尾
+    }
+  }
+  const dirs = [];
+  async function walkDirs(rel) {
+    const abs = rel ? path.join(root, rel) : root;
+    let entries;
+    try {
+      entries = await fsp.readdir(abs, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const ent of entries) {
+      if (!ent.isDirectory()) continue;
+      const child = rel ? `${rel}/${ent.name}` : ent.name;
+      await walkDirs(child);
+      dirs.push(child);
+    }
+  }
+  await walkDirs('');
+  for (const rel of dirs) {
+    try {
+      await fsp.rmdir(path.join(root, rel));
+    } catch {
+      // 非空则留下
+    }
+  }
+}
+
 module.exports = {
-  SESSIONS_ROOT,
+  getSessionsRoot,
   createSession,
   loadSession,
   listSessions,
@@ -603,8 +698,14 @@ module.exports = {
   deriveProjectName,
   resolveUnderRoot,
   sessionsRootIgnorePrefix,
+  buildWatchTargets,
   sessionDir,
   metaPath,
   baselineDir,
   afterDir,
 };
+
+Object.defineProperty(module.exports, 'SESSIONS_ROOT', {
+  enumerable: true,
+  get: getSessionsRoot,
+});

@@ -2,6 +2,7 @@ const fs = require('fs');
 const fsp = require('fs/promises');
 const path = require('path');
 const { loadIgnore, toPosix } = require('./ignore-files');
+const { pathPrefix, prefixedRel } = require('./workspace-scope');
 
 const MAX_FILE_BYTES = 1.5 * 1024 * 1024;
 const WALK_CONCURRENCY = 8;
@@ -139,15 +140,18 @@ async function snapshotOne(workspaceRoot, baselineRoot, rel) {
   };
 }
 
-async function snapshotWorkspaceBaseline(workspaceRoot, baselineRoot, shouldIgnore) {
+async function snapshotWorkspaceBaseline(workspaceRoot, baselineRoot, shouldIgnore, options = {}) {
+  const prefix = toPosix(options.pathPrefix || '');
+  const resolveRoot = options.resolveRoot || workspaceRoot;
   const files = await walkFiles(workspaceRoot, shouldIgnore);
   const inventory = {};
   let snapshotted = 0;
   let skipped = 0;
   await mapLimit(files, WALK_CONCURRENCY, async (rel) => {
-    const rec = await snapshotOne(workspaceRoot, baselineRoot, rel);
+    const lcaRel = prefixedRel(prefix, rel);
+    const rec = await snapshotOne(resolveRoot, baselineRoot, lcaRel);
     if (!rec) return;
-    inventory[rel] = {
+    inventory[lcaRel] = {
       size: rec.size,
       mtimeMs: rec.mtimeMs,
       binary: !!rec.binary,
@@ -163,6 +167,31 @@ async function snapshotWorkspaceBaseline(workspaceRoot, baselineRoot, shouldIgno
     skipped,
     files: inventory,
   };
+}
+
+async function snapshotWorkspaceRoots({ pathRoot, workspaceRoots, baselineRoot, extraPrefixForRoot }) {
+  const roots = (workspaceRoots && workspaceRoots.length) ? workspaceRoots : [pathRoot];
+  const merged = {
+    capturedAt: new Date().toISOString(),
+    fileCount: 0,
+    snapshotted: 0,
+    skipped: 0,
+    files: {},
+  };
+  for (const root of roots) {
+    const extra = typeof extraPrefixForRoot === 'function' ? extraPrefixForRoot(root) : [];
+    const ignore = await loadIgnore(root, extra);
+    const part = await snapshotWorkspaceBaseline(root, baselineRoot, ignore.shouldIgnore, {
+      pathPrefix: pathPrefix(pathRoot, root),
+      resolveRoot: pathRoot,
+    });
+    Object.assign(merged.files, part.files);
+    merged.snapshotted += part.snapshotted;
+    merged.skipped += part.skipped;
+  }
+  merged.fileCount = Object.keys(merged.files).length;
+  merged.capturedAt = new Date().toISOString();
+  return merged;
 }
 
 async function writeInventory(sessionDir, inventory) {
@@ -185,31 +214,38 @@ function mtimeChanged(a, b) {
   return Math.abs(a - b) > 1.5;
 }
 
+function workspaceRootList(workspaceRoot, workspaceRoots) {
+  if (Array.isArray(workspaceRoots) && workspaceRoots.length) return workspaceRoots;
+  return workspaceRoot ? [workspaceRoot] : [];
+}
+
 async function discoverChangedPaths({
   workspaceRoot,
+  workspaceRoots,
   sessionDir,
   extraPaths = [],
   dirtyPaths = [],
   extraPrefixes = [],
+  extraPrefixForRoot,
 }) {
-  const ignore = await loadIgnore(workspaceRoot, extraPrefixes);
+  const pathRoot = path.resolve(workspaceRoot);
+  const roots = workspaceRootList(pathRoot, workspaceRoots).map((r) => path.resolve(r));
   const inventory = await readInventory(sessionDir);
   const invFiles = inventory.files || {};
   const changed = new Set();
 
-  function consider(rel, force = false) {
+  function consider(rel) {
     const posix = toPosix(rel);
     if (!posix) return;
-    if (!force && ignore.shouldIgnore(posix, false)) return;
     changed.add(posix);
   }
 
-  for (const rel of extraPaths) consider(rel, true);
+  for (const rel of extraPaths) consider(rel);
   for (const rel of dirtyPaths) {
     const posix = toPosix(rel);
     if (!posix) continue;
     try {
-      const st = await fsp.stat(resolveUnderRoot(workspaceRoot, posix));
+      const st = await fsp.stat(resolveUnderRoot(pathRoot, posix));
       if (st.isDirectory()) continue;
     } catch {
       // 路径已消失：按删除文件处理
@@ -222,25 +258,33 @@ async function discoverChangedPaths({
   }
 
   const seen = new Set();
-  const current = await walkFiles(workspaceRoot, ignore.shouldIgnore);
-  await mapLimit(current, WALK_CONCURRENCY, async (rel) => {
-    seen.add(rel);
-    const rec = invFiles[rel];
-    if (!rec) {
-      consider(rel);
-      return;
-    }
-    if (rec.skipped) return;
-    const abs = resolveUnderRoot(workspaceRoot, rel);
-    let st;
-    try {
-      st = await fsp.stat(abs);
-    } catch {
-      consider(rel);
-      return;
-    }
-    if (st.size !== rec.size || mtimeChanged(st.mtimeMs, rec.mtimeMs)) consider(rel);
-  });
+  for (const root of roots) {
+    const extra = typeof extraPrefixForRoot === 'function'
+      ? extraPrefixForRoot(root)
+      : extraPrefixes;
+    const ignore = await loadIgnore(root, extra);
+    const prefix = pathPrefix(pathRoot, root);
+    const current = await walkFiles(root, ignore.shouldIgnore);
+    await mapLimit(current, WALK_CONCURRENCY, async (rel) => {
+      const lcaRel = prefixedRel(prefix, rel);
+      seen.add(lcaRel);
+      const rec = invFiles[lcaRel];
+      if (!rec) {
+        consider(lcaRel);
+        return;
+      }
+      if (rec.skipped) return;
+      const abs = resolveUnderRoot(pathRoot, lcaRel);
+      let st;
+      try {
+        st = await fsp.stat(abs);
+      } catch {
+        consider(lcaRel);
+        return;
+      }
+      if (st.size !== rec.size || mtimeChanged(st.mtimeMs, rec.mtimeMs)) consider(lcaRel);
+    });
+  }
 
   for (const rel of Object.keys(invFiles)) {
     if (invFiles[rel]?.skipped) continue;
@@ -258,6 +302,7 @@ module.exports = {
   MAX_FILE_BYTES,
   inventoryPath,
   snapshotWorkspaceBaseline,
+  snapshotWorkspaceRoots,
   writeInventory,
   readInventory,
   discoverChangedPaths,

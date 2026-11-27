@@ -23,8 +23,9 @@ function printHelp() {
 codex-session-diff
 
 命令:
-  begin --workspace <dir> [--title t] [--files f1,f2] [--no-watch]
-      编码前捕获工作区基线并启动文件监听；不必预列文件
+  begin --workspace <dir> [--workspace <dir> ...] [--title t] [--files f1,f2] [--no-watch]
+      编码前捕获指定项目根的基线并启动文件监听；可重复 --workspace
+      不要把多个独立项目的共同父目录当成唯一工作区
       --files 仅用于强制纳入（例如被 ignore 的路径或尚未创建的文件）
 
   track --session <id> --files f1,f2
@@ -53,7 +54,12 @@ function parseKv(argv) {
   const out = { _: [] };
   for (let i = 0; i < argv.length; i += 1) {
     const a = argv[i];
-    if (a === '--workspace' || a === '-w') out.workspace = argv[++i];
+    if (a === '--workspace' || a === '-w') {
+      const value = argv[++i];
+      if (!out.workspaces) out.workspaces = [];
+      if (value) out.workspaces.push(value);
+      out.workspace = value;
+    }
     else if (a === '--files' || a === '-f') out.files = argv[++i];
     else if (a === '--file') {
       out.files = out.files ? `${out.files},${argv[++i]}` : argv[++i];
@@ -81,12 +87,14 @@ function parseFiles(raw) {
 }
 
 async function cmdBegin(args) {
-  const workspace = path.resolve(args.workspace || process.cwd());
+  const workspaces = (args.workspaces && args.workspaces.length)
+    ? args.workspaces
+    : [args.workspace || process.cwd()];
   const files = parseFiles(args.files);
   // also accept positional files
   for (const p of args._) files.push(p);
   const meta = await createSession({
-    workspace,
+    workspaces,
     title: args.title || '',
     files,
     watch: !args.noWatch,
@@ -96,7 +104,10 @@ async function cmdBegin(args) {
   } else {
     console.log(meta.sessionId);
     console.error(`session created: ${meta.sessionId}`);
-    console.error(`workspace: ${meta.workspaceRoot}`);
+    const roots = meta.workspaceRoots && meta.workspaceRoots.length
+      ? meta.workspaceRoots.join(', ')
+      : meta.workspaceRoot;
+    console.error(`workspace: ${roots}`);
     console.error(`baseline files: ${meta.watch?.snapshotted ?? 0}`);
     if (meta.watch?.enabled) console.error(`watch pid: ${meta.watch.pid}`);
     else if (meta.watch?.error) console.error(`watch failed: ${meta.watch.error}（收尾仍会扫描）`);
