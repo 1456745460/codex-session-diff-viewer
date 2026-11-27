@@ -40,11 +40,21 @@ scripts/session_diff.sh begin \
   --title "本回合任务标题"
 ```
 
-- `--workspace`：项目根目录，不要用 `$HOME`
+本回合操作多个项目时，为每个项目根重复 `--workspace`，不要传它们的共同父目录：
+
+```bash
+scripts/session_diff.sh begin \
+  --workspace "/Users/me/PycharmProjects/test" \
+  --workspace "/Users/me/PycharmProjects/test2" \
+  --title "两个项目分别写入 test.txt"
+```
+
+- `--workspace`：实际项目根目录，可重复。不要用 `$HOME`，也不要把「下面挂着很多独立项目」的父目录（例如 `PycharmProjects`）当成唯一工作区；那种情况 begin 会拒绝。
 - `--title`：建议写本回合任务一句话，便于会话下拉区分各轮
 - 不必传 `--files`。begin 会：
-  1. 把工作区可跟踪文件快照为「本回合编码前」
+  1. 只把这些项目根里可跟踪文件快照为「本回合编码前」（不扫描共同父目录下的兄弟项目）
   2. 启动文件监听，记录随后的创建/修改/删除
+  3. 收尾时 `baseline/` 只留下本回合 Diff 里的文件
 - `--files` 可选，只用于强制纳入被 ignore 的路径，或尚未创建、希望先占位的文件
 - 若上一轮还没有 after 快照，会顺手用当时工作区把它冻成「上一轮改完后」
 - 命令 stdout 输出**新的** `sessionId`（保存备用；本回合收尾优先用它）
@@ -86,7 +96,7 @@ scripts/session_diff.sh status --session <本回合sessionId|latest>
 
 只要本回合会改代码文件，必须：
 
-1. **本回合改文件前重新 `begin --workspace`**（不要复用上一轮 session，不必预列文件）
+1. **本回合改文件前重新 `begin --workspace`**（不要复用上一轮 session，不必预列文件；多个项目就重复 `--workspace`，不要传共同父目录）
 2. 本回合编码、验证
 3. **本回合收尾**执行 `summarize` + `open`（优先本回合 sessionId）
 4. 在最终回复中给出可点击链接：`[查看本回合代码变更](http://127.0.0.1:3847)`（端口固定，不因多次 open 递增）
@@ -115,7 +125,7 @@ scripts/session_diff.sh status --session <本回合sessionId|latest>
 
 ## 关键约束
 
-- 对比源：`~/.codex/session-diffs/<sessionId>/baseline` vs `after`（本回合收尾冻结的改完后快照）
+- 对比源：`~/.codex/session-diffs/<sessionId>/baseline` vs `after`（本回合收尾冻结的改完后快照）。baseline 的父目录是 `--workspace` 指向的项目根（多个时是它们的共同父目录，但只用于拼相对路径，不会把兄弟项目拷进去）
 - 切换历史会话时必须看到「当时版本 1 vs 当时版本 2」，禁止拿历史 baseline 对工作区最新文件做 diff
 - 回合尚未 summarize/open 时，才允许临时对比 baseline vs 工作区当前（未冻结）
 - 不要用 `git diff HEAD`、`git diff --staged` 充当“此次变更”

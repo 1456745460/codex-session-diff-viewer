@@ -134,9 +134,10 @@ http://127.0.0.1:3847
 1. **本回合首次改文件前**执行 begin，捕获**本回合编码前**基线并开始监听：
    ```bash
    "$HOME/.codex/skills/codex-session-diff-viewer/scripts/session_diff.sh" begin \
-     --workspace "<绝对工作区路径>" \
+     --workspace "<实际项目根绝对路径>" \
      --title "<本回合任务一句话>"
    ```
+   操作多个项目时为每个项目根重复 `--workspace`，不要传它们的共同父目录。
 2. 正常编码（只改本回合需要的文件）。
 3. **本回合收尾**（最终回复前）执行 summarize + open（优先使用本回合 sessionId）：
    ```bash
@@ -208,8 +209,17 @@ scripts/session_diff.sh begin \
   --title "可选任务标题"
 ```
 
-- `--workspace`：工作区绝对路径（项目根）
-- 不必 `--files`：会快照可跟踪文件并监听随后变更
+多个项目：
+
+```bash
+scripts/session_diff.sh begin \
+  --workspace "/abs/path/to/test" \
+  --workspace "/abs/path/to/test2" \
+  --title "两个项目分别写入 test.txt"
+```
+
+- `--workspace`：实际项目根绝对路径，可重复。不要用 `$HOME`，也不要把多个独立项目的共同父目录当成唯一工作区（begin 会拒绝）
+- 不必 `--files`：会快照这些项目根里可跟踪文件并监听随后变更；收尾后 `baseline/` 只留本回合改过的文件
 - `--files` 可选，强制纳入被 ignore 的路径或尚未创建的文件
 - 已存在文件：复制当前内容为基线（APFS 上优先 clonefile）
 - 不存在文件：记为缺失，最终显示为「新增」
@@ -329,7 +339,7 @@ scripts/session_diff.sh open --session latest --no-open   # 只启动服务，�
 1. 改文件前没执行 `begin`
 2. 文件改完后又改回原样（无差异）
 3. 改动落在忽略规则里（skill 根目录 `ignore-dirs.txt`、工作区 `.gitignore`、图片/压缩包等）
-4. `--workspace` 指错了目录
+4. `--workspace` 指错了目录，或把多个项目的共同父目录传进去被拒绝了
 
 ### Q2：可以只用 git diff 吗？
 
