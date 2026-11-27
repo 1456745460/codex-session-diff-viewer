@@ -38,7 +38,17 @@ async function readDirty(sessionDir) {
   };
 }
 
-async function addDirtyPaths(sessionDir, sessionId, paths) {
+const dirtyWriteTail = new Map();
+
+function enqueueDirtyWrite(sessionDir, fn) {
+  const key = sessionDir;
+  const tail = dirtyWriteTail.get(key) || Promise.resolve();
+  const next = tail.then(fn, fn);
+  dirtyWriteTail.set(key, next.catch(() => {}));
+  return next;
+}
+
+async function addDirtyPathsNow(sessionDir, sessionId, paths) {
   const incoming = (paths || []).map(toPosix).filter(Boolean);
   if (!incoming.length) return readDirty(sessionDir);
   const current = await readDirty(sessionDir);
@@ -51,6 +61,10 @@ async function addDirtyPaths(sessionDir, sessionId, paths) {
   };
   await writeJsonAtomic(dirtyPath(sessionDir), next);
   return next;
+}
+
+async function addDirtyPaths(sessionDir, sessionId, paths) {
+  return enqueueDirtyWrite(sessionDir, () => addDirtyPathsNow(sessionDir, sessionId, paths));
 }
 
 function isPidAlive(pid) {
@@ -90,12 +104,19 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function watchWorkspace(workspaceRoot, { shouldIgnore, onBatch, debounceMs = 180 } = {}) {
+function ignoredBy(shouldIgnore, rel) {
+  if (!shouldIgnore) return false;
+  return shouldIgnore(rel, false) || shouldIgnore(rel, true);
+}
+
+async function watchWorkspace(workspaceRoot, { shouldIgnore, onBatch, debounceMs = 180 } = {}) {
   const root = path.resolve(workspaceRoot);
   let timer = null;
   const pending = new Set();
   let closed = false;
-  let watcher;
+  const watchers = [];
+  const watched = new Set();
+  const pendingNewDirs = new Set();
 
   const flush = () => {
     timer = null;
@@ -108,27 +129,78 @@ function watchWorkspace(workspaceRoot, { shouldIgnore, onBatch, debounceMs = 180
   };
 
   const note = (filename) => {
-    if (!filename) return;
+    if (filename == null) return;
     const rel = toPosix(filename);
     if (!rel || rel === '.') return;
-    if (shouldIgnore && shouldIgnore(rel, false) && shouldIgnore(rel, true)) return;
+    if (ignoredBy(shouldIgnore, rel)) return;
     pending.add(rel);
     clearTimeout(timer);
     timer = setTimeout(flush, debounceMs);
   };
 
-  try {
-    watcher = fs.watch(root, { recursive: true }, (_event, filename) => {
-      note(filename);
-    });
-  } catch (error) {
-    error.code = error.code || 'WATCH_UNSUPPORTED';
-    throw error;
+  async function walkAndWatch(absDir, relDir) {
+    if (closed) return;
+    if (relDir && ignoredBy(shouldIgnore, relDir)) return;
+    if (watched.has(relDir)) return;
+    watched.add(relDir);
+
+    try {
+      const watcher = fs.watch(absDir, { recursive: false }, (_event, filename) => {
+        if (closed) return;
+        if (!filename) {
+          if (relDir) note(relDir);
+          return;
+        }
+        const rel = relDir ? `${relDir}/${toPosix(filename)}` : toPosix(filename);
+        note(rel);
+        queueNewDir(rel);
+      });
+      watcher.on('error', () => {
+        // keep process alive; summarize 会走 inventory 扫描兜底
+      });
+      watchers.push(watcher);
+    } catch {
+      return;
+    }
+
+    let entries;
+    try {
+      entries = await fsp.readdir(absDir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const ent of entries) {
+      if (closed) return;
+      try {
+        if (ent.isSymbolicLink() || !ent.isDirectory()) continue;
+      } catch {
+        continue;
+      }
+      const childRel = relDir ? `${relDir}/${ent.name}` : ent.name;
+      await walkAndWatch(path.join(absDir, ent.name), childRel);
+    }
   }
 
-  watcher.on('error', () => {
-    // keep process alive; summarize 会走 inventory 扫描兜底
-  });
+  function queueNewDir(rel) {
+    const posix = toPosix(rel);
+    if (!posix || posix === '.' || pendingNewDirs.has(posix) || watched.has(posix)) return;
+    if (ignoredBy(shouldIgnore, posix)) return;
+    pendingNewDirs.add(posix);
+    Promise.resolve()
+      .then(async () => {
+        if (closed) return;
+        const abs = path.join(root, posix);
+        const st = await fsp.lstat(abs);
+        if (!st.isDirectory()) return;
+        await walkAndWatch(abs, posix);
+      })
+      .catch(() => {})
+      .finally(() => {
+        pendingNewDirs.delete(posix);
+      });
+  }
+
+  await walkAndWatch(root, '');
 
   return {
     close() {
@@ -138,18 +210,21 @@ function watchWorkspace(workspaceRoot, { shouldIgnore, onBatch, debounceMs = 180
         timer = null;
       }
       flush();
-      try {
-        watcher.close();
-      } catch {
-        // already closed
+      for (const watcher of watchers) {
+        try {
+          watcher.close();
+        } catch {
+          // already closed
+        }
       }
+      watchers.length = 0;
     },
   };
 }
 
 async function runWatchLoop({ sessionId, sessionDir, workspaceRoot, shouldIgnore }) {
   await writePid(sessionDir, process.pid);
-  const watcher = watchWorkspace(workspaceRoot, {
+  const watcher = await watchWorkspace(workspaceRoot, {
     shouldIgnore,
     onBatch: (paths) => addDirtyPaths(sessionDir, sessionId, paths),
   });

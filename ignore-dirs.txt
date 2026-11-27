@@ -1,0 +1,32 @@
+# Codex Session Diff Viewer 忽略目录
+# gitignore 语法，一行一条；改这个文件即可，不必改 JS。
+# 对所有被 begin 的工作区生效；工作区自己的 .gitignore 仍然有效。
+
+.git/
+.svn/
+.hg/
+.jj/
+node_modules/
+bower_components/
+dist/
+build/
+out/
+target/
+coverage/
+.next/
+.nuxt/
+.cache/
+.turbo/
+.output/
+.gradle/
+__pycache__/
+.venv/
+venv/
+.tox/
+.mypy_cache/
+.pytest_cache/
+.idea/
+.vscode/
+
+# ThinkRail / 本 skill 的任务草稿，不进会话 Diff、也不监听
+.thinkrail/context/

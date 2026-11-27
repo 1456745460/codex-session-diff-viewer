@@ -205,7 +205,17 @@ async function discoverChangedPaths({
   }
 
   for (const rel of extraPaths) consider(rel, true);
-  for (const rel of dirtyPaths) consider(rel);
+  for (const rel of dirtyPaths) {
+    const posix = toPosix(rel);
+    if (!posix) continue;
+    try {
+      const st = await fsp.stat(resolveUnderRoot(workspaceRoot, posix));
+      if (st.isDirectory()) continue;
+    } catch {
+      // 路径已消失：按删除文件处理
+    }
+    consider(rel);
+  }
 
   if (!inventory.capturedAt) {
     return [...changed].sort();
