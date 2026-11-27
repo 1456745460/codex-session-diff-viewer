@@ -30,7 +30,7 @@
 
 每次 `begin` 都会创建**新的** `sessionId`，即使工作区相同、聊天线程相同。
 
-begin **不必** `--files`：先快照可跟踪文件（尊重 `.gitignore` 与 `node_modules/`、`target/` 等），再启动 `fs.watch`。监听事件发生在写入之后，所以「改前内容」来自 begin 快照，而不是事件本身。
+begin **不必** `--files`：先快照可跟踪文件（尊重 skill 根目录 `ignore-dirs.txt` 与工作区 `.gitignore`），再对未忽略目录启动 `fs.watch`。监听事件发生在写入之后，所以「改前内容」来自 begin 快照，而不是事件本身。忽略目录既不进快照也不被监听，避免 `node_modules/` 等子树把其它目录的变更事件挤掉。
 
 收尾时合并 `dirty.json` 与 inventory 扫描（mtime/size），漏掉的事件也能被发现。
 

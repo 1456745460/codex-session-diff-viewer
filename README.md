@@ -328,7 +328,7 @@ scripts/session_diff.sh open --session latest --no-open   # 只启动服务，�
 
 1. 改文件前没执行 `begin`
 2. 文件改完后又改回原样（无差异）
-3. 改动落在默认 ignore 里（如 `node_modules/`、`target/`、图片/压缩包）
+3. 改动落在忽略规则里（skill 根目录 `ignore-dirs.txt`、工作区 `.gitignore`、图片/压缩包等）
 4. `--workspace` 指错了目录
 
 ### Q2：可以只用 git diff 吗？
@@ -368,6 +368,10 @@ scripts/session_diff.sh open --session <sessionId>
 
 如果磁盘上的 `after/**` 已经正确，但网页仍把后续回合的改动叠进旧会话，通常是 3847 上还挂着升级前的查看器进程。`open` 会识别缺少 `session-watch-v1` 协议的旧服务并重启。
 
+### Q7：如何忽略某些目录、不监听它们？
+
+编辑 skill 仓库根目录的 [`ignore-dirs.txt`](ignore-dirs.txt)（gitignore 语法）。这份清单对所有被 `begin` 的工作区生效，例如默认已忽略 `node_modules/`、`target/`、`.thinkrail/context/`。工作区自己的 `.gitignore` 仍然有效。忽略目录不会进入 Diff，也不会被文件监听（避免干扰其它目录的变更检测）。
+
 ---
 
 ## 10. 目录结构
@@ -376,6 +380,7 @@ scripts/session_diff.sh open --session <sessionId>
 codex-session-diff-viewer/
 ├── SKILL.md                 # Codex skill 定义（给模型读）
 ├── README.md                # 本说明（给人读）
+├── ignore-dirs.txt          # 可手改的忽略目录清单（对所有工作区生效）
 ├── scripts/session_diff.sh  # CLI 入口
 ├── agents/
 ├── references/workflow.md

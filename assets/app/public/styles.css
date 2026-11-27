@@ -882,6 +882,10 @@ body.is-resizing-sidebar {
   grid-template-columns: 1fr;
 }
 
+.diff-pane-labels.unified .pane-label {
+  overflow-wrap: anywhere;
+}
+
 .pane-label {
   padding: 8px 12px;
   color: var(--fg-muted);

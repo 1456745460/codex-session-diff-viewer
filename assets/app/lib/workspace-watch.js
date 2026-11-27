@@ -159,7 +159,11 @@ async function watchWorkspace(workspaceRoot, { shouldIgnore, onBatch, debounceMs
         // keep process alive; summarize 会走 inventory 扫描兜底
       });
       watchers.push(watcher);
-    } catch {
+    } catch (error) {
+      if (!relDir) {
+        error.code = error.code || 'WATCH_UNSUPPORTED';
+        throw error;
+      }
       return;
     }
 

@@ -272,6 +272,21 @@
     return { dir: path.slice(0, idx + 1), base: path.slice(idx + 1) };
   }
 
+  function workspaceRootPath() {
+    const raw = state.summary?.workspaceRoot || state.summary?.repoRoot || '';
+    return String(raw).replace(/\\/g, '/').replace(/\/+$/, '');
+  }
+
+  function toAbsoluteDisplayPath(rel) {
+    if (rel == null || rel === '') return '';
+    const p = String(rel).replace(/\\/g, '/');
+    const root = workspaceRootPath();
+    if (!root) return p;
+    if (p === root || p.startsWith(`${root}/`)) return p;
+    if (p.startsWith('/') || /^[A-Za-z]:\//.test(p)) return p;
+    return `${root}/${p.replace(/^\/+/, '')}`;
+  }
+
   function withSession(url) {
     if (!state.sessionId) return url;
     const join = url.includes('?') ? '&' : '?';
@@ -1119,8 +1134,8 @@
     el.fileStatusBadge.className = `status-badge ${diff.status}`;
     const pathText =
       diff.status === 'renamed' && diff.oldPath && diff.oldPath !== diff.path
-        ? `${diff.oldPath} → ${diff.path}`
-        : diff.path;
+        ? `${toAbsoluteDisplayPath(diff.oldPath)} → ${toAbsoluteDisplayPath(diff.path)}`
+        : toAbsoluteDisplayPath(diff.path);
     el.filePathLabel.textContent = pathText;
     el.filePathLabel.classList.remove('hidden');
     if (diff.binary) {
@@ -1365,7 +1380,7 @@
 
       el.diffRoot.innerHTML = `
         <div class="diff-pane-labels unified">
-          <div class="pane-label"><strong>本次会话统一 Diff</strong>${escapeHtml(diff.path)}</div>
+          <div class="pane-label"><strong>本次会话统一 Diff</strong>${escapeHtml(toAbsoluteDisplayPath(diff.path))}</div>
         </div>
         <div class="diff-scroll-host">
           ${wrapDiffPane('diffScrollMain', gutterBody, codeBody, hideLn)}

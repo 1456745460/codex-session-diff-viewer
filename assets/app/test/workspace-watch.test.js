@@ -32,6 +32,15 @@ async function withTempDir(fn) {
   }
 }
 
+test('shipped ignore-dirs.txt ignores .thinkrail/context/', async () => {
+  await withTempDir(async (root) => {
+    const { shouldIgnore } = await loadIgnore(root);
+    assert.equal(shouldIgnore('.thinkrail/context/TASK.md', false), true);
+    assert.equal(shouldIgnore('.thinkrail/context', true), true);
+    assert.equal(shouldIgnore('src/a.js', false), false);
+  });
+});
+
 test('loadIgnore honors skill ignore-dirs including .thinkrail/context/', async () => {
   await withTempDir(async (root) => {
     const ignoreFile = path.join(root, 'ignore-dirs.txt');
